@@ -16,6 +16,8 @@ EN_WEB_Q_RE = re.compile(r"^(who|what|when|where|why|how|which|is|are|can|could|
 HE_WEB_Q_RE = re.compile(r"^(מי|מה|מתי|איפה|למה|איך|איזה|האם|כמה|מיהו|מיהם|מהו|מהי)\b")
 CURRENT_HINTS_RE = re.compile(r"\b(latest|current|today|news|update|now|recent)\b", re.IGNORECASE)
 HE_CURRENT_HINTS_RE = re.compile(r"(היום|עכשיו|אחרון|עדכני|חדש|חדשות|כיום|נוכחי)")
+PERSONAL_HINTS_RE = re.compile(r"\b(my|mine|me|today|tonight|tomorrow|this week|my schedule|my calendar|reminders|notes|downloads|documents|messages|email|inbox)\b", re.IGNORECASE)
+HE_PERSONAL_HINTS_RE = re.compile(r"(שלי|אצלי|היום|הלילה|מחר|השבוע|היומן|הלוז|לוח זמנים|תזכורות|פתקים|הורדות|מסמכים|הודעות|מייל|דואר)")
 
 
 class Brain:
@@ -27,10 +29,43 @@ class Brain:
             return "he" if self.config.language_mode == "Hebrew" else "en"
         return "he" if HEBREW_RE.search(text) else "en"
 
+    def _personal_domain_reply(self, user_text: str, language: str) -> AssistantReply | None:
+        lowered = user_text.lower().strip()
+
+        def make(gui: str, spoken: str, intent: str = "personal_unavailable") -> AssistantReply:
+            return AssistantReply(language, intent, gui, spoken, tool=None, raw_user_text=user_text)
+
+        schedule_tokens = ["schedule", "calendar", "my day", "today", "tonight", "tomorrow", "לוח זמנים", "יומן", "הלוז", "מה יש לי", "מה קורה לי", "היום", "הלילה", "מחר"]
+        reminders_tokens = ["reminders", "reminder", "notes", "messages", "email", "inbox", "תזכורות", "פתקים", "הודעות", "מייל", "דואר"]
+        personal_markers = ["my", "mine", "שלי", "אצלי"]
+
+        has_schedule = any(token in lowered for token in schedule_tokens)
+        has_private_bucket = any(token in lowered for token in reminders_tokens)
+        has_personal_marker = any(token in lowered for token in personal_markers)
+
+        if has_schedule and (has_personal_marker or any(token in lowered for token in ["today", "tonight", "tomorrow", "היום", "הלילה", "מחר", "what is on", "what do i have", "show me", "what's on"])):
+            return make(
+                "אני עדיין לא יכול לגשת ללוח הזמנים האישי שלך." if language == "he" else "I can't access your personal schedule yet.",
+                "I can't access your personal schedule yet.",
+            )
+
+        if has_private_bucket and has_personal_marker:
+            return make(
+                "אני עדיין לא יכול לגשת למידע האישי הזה." if language == "he" else "I can't access that personal information yet.",
+                "I can't access that personal information yet.",
+            )
+
+        return None
+
     def build_reply(self, user_text: str) -> AssistantReply:
         language = self.detect_language(user_text)
+        personal_reply = self._personal_domain_reply(user_text, language)
+        if personal_reply is not None:
+            return self._apply_personality(personal_reply)
         ollama_reply = self._try_ollama(user_text, language)
         if ollama_reply is not None:
+            if ollama_reply.intent == "answer_web_question" and self._personal_domain_reply(user_text, language) is not None:
+                return self._apply_personality(self._personal_domain_reply(user_text, language))
             return self._apply_personality(ollama_reply)
         return self._apply_personality(self._fallback_reply(user_text, language))
 
@@ -57,7 +92,7 @@ class Brain:
             "spoken_text must be concise English. tool must be null or an object with keys name and args. "
             "Prefer these tools only when relevant: open_app, close_app, open_website, search_web, answer_web_question, open_folder, "
             "tell_time, tell_date, system_status, calculate, create_note, search_files, lock_computer, shutdown_request. "
-            "For factual or current-event questions, prefer answer_web_question. "
+            "For factual or current-event questions, prefer answer_web_question. Never use web search for the user's personal schedule, calendar, reminders, notes, messages, or inbox. For unsupported personal data requests, say you cannot access that personal information yet. "
             f"{self._assistant_style_prompt()} "
             "Never output markdown. Never invent unsupported tools."
         )
@@ -296,15 +331,11 @@ class Brain:
                 tool=ToolAction("shutdown_request", {}),
             )
 
-        if any(alias in lowered for alias in ["schedule", "calendar", "instagram", "אינסטגרם", "לוח זמנים", "יומן"]) and not explicit_open:
-            if language == "he":
-                return make(
-                    "אני יכול להציג את זה אם תרצה, sir. תגיד לי לפתוח את היומן או את אינסטגרם במפורש.",
-                    "Sir, I can bring that up if you want. Just ask me to open it.",
-                )
+        if any(alias in lowered for alias in ["schedule", "calendar", "לוח זמנים", "יומן", "הלוז"]) and not explicit_open:
             return make(
-                "Sir, I can bring that up if you want. Just ask me to open it explicitly.",
-                "Sir, I can bring that up if you want. Just ask me to open it explicitly.",
+                lang_text("אני עדיין לא יכול לגשת ללוח הזמנים האישי שלך.", "I can't access your personal schedule yet."),
+                "I can't access your personal schedule yet.",
+                intent="personal_unavailable",
             )
 
         help_he = (
@@ -328,6 +359,8 @@ class Brain:
     def _looks_like_web_question(self, text: str, language: str) -> bool:
         lowered = text.lower().strip()
         if any(token in lowered for token in ["open ", "close ", "bring up", "show ", "פתח", "סגור", "תציג", "search files", "חפש קובץ", "write note", "הערה", "calculate", "חשב", "כמה זה"]):
+            return False
+        if self._personal_domain_reply(text, language) is not None:
             return False
         if language == "he":
             return bool(HE_WEB_Q_RE.search(lowered) or HE_CURRENT_HINTS_RE.search(lowered) or lowered.endswith("?"))
