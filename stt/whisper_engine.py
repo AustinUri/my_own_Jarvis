@@ -58,8 +58,8 @@ class WhisperEngine:
 
     def __init__(
         self,
-        model_name: str = 'small',
-        silence_threshold: float = 0.012,
+        model_name: str = 'medium',
+        silence_threshold: float = 0.009,
         mic_name: str = 'Default',
         language_mode: str = 'Auto',
         accent_assist_enabled: bool = True,
@@ -73,6 +73,8 @@ class WhisperEngine:
         self.mic_name = mic_name
         self.language_mode = language_mode
         self.accent_assist_enabled = accent_assist_enabled
+        self.command_min_seconds = 1.8
+        self.command_preroll_seconds = 0.45
         self.aliases_path = Path(aliases_path) if aliases_path else None
         self.backend = backend
         self.whisper_cpp_path = str(whisper_cpp_path or '').strip()
@@ -82,8 +84,8 @@ class WhisperEngine:
 
     def transcribe_microphone_command(
         self,
-        max_seconds: float = 7.0,
-        silence_seconds: float = 1.1,
+        max_seconds: float = 9.0,
+        silence_seconds: float = 1.4,
         threshold: float | None = None,
     ) -> tuple[str, str]:
         wav_path = self.record_command(max_seconds=max_seconds, silence_seconds=silence_seconds, threshold=threshold)
@@ -92,8 +94,8 @@ class WhisperEngine:
 
     def record_command(
         self,
-        max_seconds: float = 7.0,
-        silence_seconds: float = 1.1,
+        max_seconds: float = 9.0,
+        silence_seconds: float = 1.4,
         threshold: float | None = None,
     ) -> Path:
         import numpy as np
@@ -102,9 +104,14 @@ class WhisperEngine:
         silence_threshold = self.silence_threshold if threshold is None else threshold
         sample_rate = 16000
         blocksize = 1600
-        silence_blocks = max(1, int(silence_seconds / (blocksize / sample_rate)))
-        max_blocks = max(1, int(max_seconds / (blocksize / sample_rate)))
-        start_timeout_blocks = max(12, int(4.0 / (blocksize / sample_rate)))
+        block_seconds = blocksize / sample_rate
+        min_seconds = max(1.0, float(getattr(self, "command_min_seconds", 1.8)))
+        preroll_seconds = max(0.1, float(getattr(self, "command_preroll_seconds", 0.45)))
+        silence_blocks = max(2, int(silence_seconds / block_seconds))
+        min_blocks = max(1, int(min_seconds / block_seconds))
+        max_blocks = max(min_blocks + 3, int(max_seconds / block_seconds))
+        start_timeout_blocks = max(24, int(5.0 / block_seconds))
+        preroll_blocks = max(2, int(preroll_seconds / block_seconds))
         device = resolve_input_device(self.mic_name)
 
         frames: list[np.ndarray] = []
@@ -121,7 +128,7 @@ class WhisperEngine:
 
                 if not speech_started:
                     lead_in.append(chunk)
-                    if len(lead_in) > 8:
+                    if len(lead_in) > preroll_blocks:
                         lead_in.pop(0)
 
                 if rms >= silence_threshold:
@@ -134,15 +141,21 @@ class WhisperEngine:
                     if speech_started:
                         frames.append(chunk)
                         silent_after_speech += 1
-                        if silent_after_speech >= silence_blocks:
+                        if len(frames) >= min_blocks and silent_after_speech >= silence_blocks:
                             break
                     elif index >= start_timeout_blocks:
                         break
 
         if not frames:
-            frames = lead_in[-1:] if lead_in else []
+            frames = lead_in[-preroll_blocks:] if lead_in else []
 
         audio = np.concatenate(frames, axis=0) if frames else np.zeros((0, 1), dtype='int16')
+
+        min_samples = int(sample_rate * min_seconds)
+        if audio.shape[0] < min_samples:
+            pad = np.zeros((min_samples - audio.shape[0], 1), dtype='int16')
+            audio = np.concatenate([audio, pad], axis=0)
+
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
         tmp_path = Path(tmp.name)
         tmp.close()
@@ -172,9 +185,11 @@ class WhisperEngine:
 
     def _build_transcribe_kwargs(self, command_mode: bool) -> dict:
         kwargs = {
-            'beam_size': 2 if self.accent_assist_enabled else 1,
+            'beam_size': 5 if self.accent_assist_enabled else 3,
             'vad_filter': True,
+            'vad_parameters': {'min_silence_duration_ms': 450, 'speech_pad_ms': 250},
             'condition_on_previous_text': False,
+            'temperature': 0.0,
         }
         if self.language_mode == 'English':
             kwargs['language'] = 'en'

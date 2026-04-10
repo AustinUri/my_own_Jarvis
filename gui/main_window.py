@@ -153,6 +153,14 @@ class SettingsDialog(QDialog):
         self.conversation_turns_spin = QSpinBox()
         self.conversation_turns_spin.setRange(1, 8)
         self.conversation_turns_spin.setValue(int(config.conversation_followup_max_turns))
+        self.interruption_checkbox = QCheckBox('Allow interruption while Jarvis is speaking')
+        self.interruption_checkbox.setChecked(config.interruption_enabled)
+        self.command_window_spin = QSpinBox()
+        self.command_window_spin.setRange(4, 15)
+        self.command_window_spin.setValue(int(round(config.command_max_seconds)))
+        self.command_min_spin = QSpinBox()
+        self.command_min_spin.setRange(1, 5)
+        self.command_min_spin.setValue(int(round(config.command_min_seconds)))
 
         content_layout.addWidget(self._make_general_section())
         content_layout.addWidget(self._make_personality_section())
@@ -235,8 +243,10 @@ class SettingsDialog(QDialog):
         form.addRow(self._label('Timeout after silence (seconds)'), self.conversation_timeout_spin)
         form.addRow(self._label('Max follow-up turns'), self.conversation_turns_spin)
         layout.addLayout(form)
+        layout.addWidget(self.interruption_checkbox)
         layout.addWidget(self._hint('After you wake Jarvis once, he can keep listening for follow-up questions without the wake phrase again.'))
         layout.addWidget(self._hint('Say stop listening or goodbye to end the session early.'))
+        layout.addWidget(self._hint('Interruption lets push-to-talk cut Jarvis off mid-reply so you can keep the conversation flowing.'))
         return section
 
     def _make_audio_section(self) -> QGroupBox:
@@ -247,10 +257,13 @@ class SettingsDialog(QDialog):
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(12)
         form.addRow(self._label('Microphone'), self.mic_combo)
+        form.addRow(self._label('Command capture window (seconds)'), self.command_window_spin)
+        form.addRow(self._label('Minimum command length (seconds)'), self.command_min_spin)
         form.addRow(self._label('Piper model path'), self.piper_input)
         form.addRow(self._label('whisper.cpp executable'), self.whisper_cpp_input)
         layout.addLayout(form)
         layout.addWidget(self.voice_checkbox)
+        layout.addWidget(self._hint('A longer capture window makes Jarvis less likely to chop off the start or end of what you said.'))
         layout.addWidget(self._hint('Use Piper only if you actually have a local voice model. Otherwise Jarvis falls back to Windows speech.'))
         return section
 
@@ -328,6 +341,9 @@ class SettingsDialog(QDialog):
         self.config.conversation_mode_enabled = self.conversation_checkbox.isChecked()
         self.config.conversation_timeout_seconds = float(self.conversation_timeout_spin.value())
         self.config.conversation_followup_max_turns = int(self.conversation_turns_spin.value())
+        self.config.interruption_enabled = self.interruption_checkbox.isChecked()
+        self.config.command_max_seconds = float(self.command_window_spin.value())
+        self.config.command_min_seconds = float(self.command_min_spin.value())
         self.config.wake_phrases = self.wake_phrases_input.text().strip() or 'Hey Jarvis'
         try:
             self.config.wake_word_threshold = max(0.10, min(0.90, float(self.wake_threshold_input.text().strip())))
@@ -639,6 +655,7 @@ class MainWindow(QMainWindow):
         self.orb_status.setText(state)
         self.status_dot.setStyleSheet(f'font-size: 24px; color: {color};')
         self.orb.set_state(state)
+        self.ptt_button.setText('Interrupt & Talk' if state == 'Speaking' and self.config.interruption_enabled else 'Push-to-talk')
         if self.tray_icon is not None:
             self.tray_icon.setToolTip(f'Jarvis — {state}')
 

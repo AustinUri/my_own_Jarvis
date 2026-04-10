@@ -60,8 +60,13 @@ class Orchestrator(QObject):
             mic_name=config.mic_name,
             vad_threshold=config.wake_vad_threshold,
         )
+        self.whisper.command_min_seconds = config.command_min_seconds
+        self.whisper.command_preroll_seconds = config.command_preroll_seconds
         self._busy = False
         self._enabled = config.assistant_enabled
+        self._state = AssistantState.IDLE if config.assistant_enabled else AssistantState.DISABLED
+        self._queued_text_after_interrupt: str | None = None
+        self._queued_voice_capture_after_interrupt = False
         self._conversation_active = False
         self._conversation_deadline = 0.0
         self._conversation_turns_left = 0
@@ -85,6 +90,9 @@ class Orchestrator(QObject):
         self.whisper.accent_assist_enabled = self.config.accent_assist_enabled
         self.whisper.backend = self.config.stt_backend
         self.whisper.whisper_cpp_path = self.config.whisper_cpp_path
+        self.whisper.command_min_seconds = self.config.command_min_seconds
+        self.whisper.command_preroll_seconds = self.config.command_preroll_seconds
+        self.whisper._model = None
         self.brain.config = self.config
         self.tools.config = self.config
         self.speaker.config = self.config
@@ -153,10 +161,15 @@ class Orchestrator(QObject):
         if not self._enabled:
             self.log_ready.emit('Assistant is disabled.')
             return
-        if self._busy:
-            self.log_ready.emit('Jarvis is already busy.')
-            return
         if not text.strip():
+            return
+        if self._busy:
+            if self._state == AssistantState.SPEAKING and self.config.interruption_enabled:
+                self._queued_text_after_interrupt = text
+                self.log_ready.emit('Interrupt requested. Switching from speaking to your new command.')
+                self.interrupt_current_reply('Interrupted by a new typed command.')
+                return
+            self.log_ready.emit('Jarvis is already busy.')
             return
         self._busy = True
         self._stop_wake_word_listener()
@@ -167,6 +180,11 @@ class Orchestrator(QObject):
             self.log_ready.emit('Assistant is disabled.')
             return
         if self._busy:
+            if self._state == AssistantState.SPEAKING and self.config.interruption_enabled:
+                self._queued_voice_capture_after_interrupt = True
+                self.log_ready.emit('Interrupt requested. Switching from speaking to live listening.')
+                self.interrupt_current_reply('Interrupted by push-to-talk.')
+                return
             self.log_ready.emit('Jarvis is already busy.')
             return
         self._busy = True
@@ -191,6 +209,31 @@ class Orchestrator(QObject):
         self._busy = True
         self._stop_wake_word_listener()
         threading.Thread(target=self._run_microphone_test, daemon=True).start()
+
+
+    def interrupt_current_reply(self, reason: str = 'Interrupted.') -> bool:
+        if self._state != AssistantState.SPEAKING:
+            return False
+        backend_message = self.speaker.stop()
+        self.log_ready.emit(reason)
+        self.log_ready.emit(backend_message)
+        self._set_state(AssistantState.LISTENING)
+        return True
+
+    def _handle_interrupt_queue(self, restart_listener: bool) -> bool:
+        queued_text = self._queued_text_after_interrupt
+        queued_voice = self._queued_voice_capture_after_interrupt
+        self._queued_text_after_interrupt = None
+        self._queued_voice_capture_after_interrupt = False
+        if queued_text:
+            self.log_ready.emit('Running interrupted follow-up command now.')
+            self._run_pipeline(queued_text, restart_listener=restart_listener, finalize=True)
+            return True
+        if queued_voice:
+            self.log_ready.emit('Listening immediately after interruption.')
+            self._capture_then_process_voice(False)
+            return True
+        return False
 
     def _start_wake_word_listener(self) -> None:
         if not self.config.wake_word_enabled or not self._enabled or self._busy:
@@ -250,7 +293,7 @@ class Orchestrator(QObject):
 
     def _capture_max_seconds(self) -> float:
         if not self._conversation_active:
-            return self.config.command_max_seconds
+            return max(self.config.command_min_seconds + 0.5, self.config.command_max_seconds)
         remaining = max(1.5, self._conversation_deadline - time.monotonic())
         return min(self.config.command_max_seconds, remaining)
 
@@ -452,6 +495,8 @@ class Orchestrator(QObject):
             self.log_ready.emit(backend if self.config.voice_enabled else 'Voice reply skipped.')
             if backend.startswith('TTS failed'):
                 self.error_raised.emit(backend)
+            if backend == 'Speech interrupted.':
+                self.log_ready.emit('Reply was interrupted so Jarvis can listen sooner.')
             time.sleep(0.05)
             self._set_state(AssistantState.IDLE if self._enabled else AssistantState.DISABLED)
         except Exception as exc:
@@ -460,6 +505,8 @@ class Orchestrator(QObject):
             self.log_ready.emit(f'Error: {exc}')
         finally:
             if finalize:
+                if self._handle_interrupt_queue(restart_listener=restart_listener):
+                    return
                 if restart_listener and self._enabled and self.config.wake_word_enabled:
                     self._start_wake_word_listener()
                 self._busy = False
@@ -508,4 +555,5 @@ class Orchestrator(QObject):
         return mapping.get(intent, result[:160] if result else 'Done.')
 
     def _set_state(self, state: AssistantState) -> None:
+        self._state = state
         self.state_changed.emit(state.value)

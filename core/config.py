@@ -18,14 +18,16 @@ class AppConfig:
     piper_model_path: str = ""
     notes_dir: str = "notes"
     prefer_short_replies: bool = True
-    stt_model_name: str = "small"
-    stt_backend: str = "Auto"
+    stt_model_name: str = "medium"
+    stt_backend: str = "faster-whisper"
     whisper_cpp_path: str = ""
     wake_word_threshold: float = 0.15
     wake_vad_threshold: float = 0.18
-    silence_threshold: float = 0.012
-    command_max_seconds: float = 7.0
-    command_silence_seconds: float = 1.1
+    silence_threshold: float = 0.009
+    command_max_seconds: float = 9.0
+    command_silence_seconds: float = 1.4
+    command_min_seconds: float = 1.8
+    command_preroll_seconds: float = 0.45
     accent_assist_enabled: bool = True
     tavily_api_key: str = ""
     searxng_base_url: str = "http://localhost:8888"
@@ -47,8 +49,9 @@ class AppConfig:
 
     # Conversation mode
     conversation_mode_enabled: bool = True
-    conversation_timeout_seconds: float = 30.0
-    conversation_followup_max_turns: int = 4
+    conversation_timeout_seconds: float = 35.0
+    conversation_followup_max_turns: int = 5
+    interruption_enabled: bool = True
 
     # Wake phrases groundwork
     wake_phrases: str = "Hey Jarvis, Jarvis, Wake up Jarvis"
