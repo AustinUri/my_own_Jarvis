@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Logs / temp / runtime
+logs/
+*.log
+*.tmp
+*.temp
+*.wav
+*.mp3
+*.pcm
+
+# Local notes / generated content
+notes/
+outputs/
+
+# Large local third-party binaries and models
+third_party/
+!third_party/.gitkeep
+
+# If you want to keep the folder structure but not the heavy files,
+# uncomment these instead of ignoring the whole folder:
+# third_party/whisper.cpp/*
+# !third_party/whisper.cpp/models/
+# !third_party/whisper.cpp/.gitkeep
+# !third_party/whisper.cpp/models/.gitkeep
+
+# Local config / secrets (uncomment if you add them later)
+# .env
+# .env.*
+# config.local.json
+# secrets.json
+
+# Local runtime config (contains API keys)
+config.json
