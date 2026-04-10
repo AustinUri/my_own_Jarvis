@@ -45,6 +45,11 @@ class AppConfig:
     start_minimized: bool = False
     keep_assistant_running_in_tray: bool = True
 
+    # Conversation mode
+    conversation_mode_enabled: bool = True
+    conversation_timeout_seconds: float = 30.0
+    conversation_followup_max_turns: int = 4
+
     # Wake phrases groundwork
     wake_phrases: str = "Hey Jarvis, Jarvis, Wake up Jarvis"
 

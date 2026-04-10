@@ -21,6 +21,10 @@ WAKEWORD_PREFIX_RE = re.compile(
     r"^\s*(?:hey\s+jarvis|jarvis|wake\s+up\s+jarvis|היי\s+ג[׳']?רוויס|ג[׳']?רוויס)\s*[,，:;\-]?\s*",
     re.IGNORECASE,
 )
+STOP_LISTENING_RE = re.compile(
+    r"\b(?:stop listening|goodbye|go to sleep|that's all|that is all|cancel|thanks goodbye)\b|(?:תפסיק להקשיב|להפסיק להקשיב|להתראות|לך לישון|זה הכל|תודה ביי)",
+    re.IGNORECASE,
+)
 
 
 class Orchestrator(QObject):
@@ -58,6 +62,10 @@ class Orchestrator(QObject):
         )
         self._busy = False
         self._enabled = config.assistant_enabled
+        self._conversation_active = False
+        self._conversation_deadline = 0.0
+        self._conversation_turns_left = 0
+        self._conversation_source = ''
         if self._enabled and self.config.wake_word_enabled:
             self._start_wake_word_listener()
 
@@ -66,6 +74,7 @@ class Orchestrator(QObject):
         return self._enabled
 
     def shutdown(self) -> None:
+        self._end_conversation_session()
         self._stop_wake_word_listener()
 
     def reload_runtime_config(self) -> None:
@@ -118,6 +127,8 @@ class Orchestrator(QObject):
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
         self.config.assistant_enabled = enabled
+        if not enabled:
+            self._end_conversation_session()
         self._set_state(AssistantState.IDLE if enabled else AssistantState.DISABLED)
         if enabled and self.config.wake_word_enabled:
             self._start_wake_word_listener()
@@ -149,7 +160,7 @@ class Orchestrator(QObject):
             return
         self._busy = True
         self._stop_wake_word_listener()
-        threading.Thread(target=self._run_pipeline, args=(text, True), daemon=True).start()
+        threading.Thread(target=self._run_pipeline, args=(text, True, True), daemon=True).start()
 
     def process_push_to_talk(self) -> None:
         if not self._enabled:
@@ -199,6 +210,62 @@ class Orchestrator(QObject):
         if self.wake_listener.running:
             self.wake_listener.stop()
 
+    def _conversation_enabled(self) -> bool:
+        return bool(self.config.conversation_mode_enabled)
+
+    def _begin_conversation_session(self, source: str) -> None:
+        if not self._conversation_enabled():
+            return
+        self._conversation_active = True
+        self._conversation_source = source
+        self._conversation_deadline = time.monotonic() + max(10.0, float(self.config.conversation_timeout_seconds))
+        self._conversation_turns_left = max(1, int(self.config.conversation_followup_max_turns))
+        self.log_ready.emit(
+            f'Conversation mode active for {int(self.config.conversation_timeout_seconds)} seconds '
+            f'with up to {self._conversation_turns_left} follow-up turn(s).'
+        )
+
+    def _refresh_conversation_session(self) -> None:
+        if not self._conversation_active:
+            return
+        self._conversation_deadline = time.monotonic() + max(10.0, float(self.config.conversation_timeout_seconds))
+
+    def _end_conversation_session(self, reason: str | None = None) -> None:
+        was_active = self._conversation_active
+        self._conversation_active = False
+        self._conversation_deadline = 0.0
+        self._conversation_turns_left = 0
+        self._conversation_source = ''
+        if was_active and reason:
+            self.log_ready.emit(reason)
+
+    def _conversation_should_continue(self) -> bool:
+        if not self._conversation_active:
+            return False
+        if time.monotonic() >= self._conversation_deadline:
+            return False
+        if self._conversation_turns_left <= 0:
+            return False
+        return self._enabled
+
+    def _capture_max_seconds(self) -> float:
+        if not self._conversation_active:
+            return self.config.command_max_seconds
+        remaining = max(1.5, self._conversation_deadline - time.monotonic())
+        return min(self.config.command_max_seconds, remaining)
+
+    def _is_stop_listening_phrase(self, transcript: str) -> bool:
+        lowered = transcript.strip().lower()
+        if not lowered:
+            return False
+        return bool(STOP_LISTENING_RE.search(lowered))
+
+    def _idle_acknowledgement(self) -> str:
+        return 'Going back to standby, sir.' if self.config.tone_mode == 'Respectful' else 'Going back to standby.'
+
+    def _miss_acknowledgement(self) -> str:
+        return 'Sir, I did not catch that.' if self.config.tone_mode == 'Respectful' else "I didn't catch that."
+
     def _on_wake_word_detected(self, event: WakeWordEvent) -> None:
         if not self._enabled or self._busy:
             return
@@ -227,41 +294,81 @@ class Orchestrator(QObject):
             except Exception:
                 pass
 
+    def _capture_voice_text(self, prompt_message: str) -> tuple[str, str]:
+        self._set_state(AssistantState.LISTENING)
+        self.log_ready.emit(prompt_message)
+        transcript, wav_path = self.whisper.transcribe_microphone_command(
+            max_seconds=self._capture_max_seconds(),
+            silence_seconds=self.config.command_silence_seconds,
+            threshold=self.config.silence_threshold,
+        )
+        cleaned = WAKEWORD_PREFIX_RE.sub('', transcript).strip()
+        transcript = cleaned or transcript.strip()
+        return transcript, wav_path
+
     def _capture_then_process_voice(self, from_wake_word: bool) -> None:
         try:
-            self._set_state(AssistantState.LISTENING)
             if from_wake_word:
-                self.log_ready.emit('Listening for your command...')
+                self._begin_conversation_session('wake')
+                prompt = 'Listening for your command...'
             else:
-                self.log_ready.emit(f'Push-to-talk recording started on {self.config.mic_name}.')
-
-            transcript, wav_path = self.whisper.transcribe_microphone_command(
-                max_seconds=self.config.command_max_seconds,
-                silence_seconds=self.config.command_silence_seconds,
-                threshold=self.config.silence_threshold,
-            )
-            cleaned = WAKEWORD_PREFIX_RE.sub('', transcript).strip()
-            transcript = cleaned or transcript.strip()
+                prompt = f'Push-to-talk recording started on {self.config.mic_name}.'
+            transcript, wav_path = self._capture_voice_text(prompt)
             if not transcript:
                 self.log_ready.emit('No command was captured after listening.')
                 if self.config.voice_enabled:
-                    miss = 'Sir, I did not catch that.' if self.config.tone_mode == 'Respectful' else "I didn't catch that."
+                    miss = self._miss_acknowledgement()
                     self.spoken_text_ready.emit(miss)
                     self._set_state(AssistantState.SPEAKING)
                     backend = self.speaker.speak(miss)
                     self.log_ready.emit(backend)
                 self._set_state(AssistantState.IDLE if self._enabled else AssistantState.DISABLED)
                 return
+            if self._is_stop_listening_phrase(transcript):
+                ack = self._idle_acknowledgement()
+                self.response_ready.emit(ack, 'en')
+                self.spoken_text_ready.emit(ack)
+                self._set_state(AssistantState.SPEAKING)
+                backend = self.speaker.speak(ack)
+                self.log_ready.emit(backend)
+                self._set_state(AssistantState.IDLE if self._enabled else AssistantState.DISABLED)
+                return
             self.log_ready.emit(f'Voice captured from {wav_path}. STT backend: {self.whisper.active_backend_label()}')
-            self._run_pipeline(transcript, restart_listener=False)
+            self._refresh_conversation_session()
+            self._run_pipeline(transcript, restart_listener=False, finalize=False)
+            self._run_followup_loop()
         except Exception as exc:
             self._set_state(AssistantState.ERROR)
             self.error_raised.emit(str(exc))
             self.log_ready.emit(f'Voice input error: {exc}')
         finally:
+            self._end_conversation_session()
             if self._enabled and self.config.wake_word_enabled:
                 self._start_wake_word_listener()
             self._busy = False
+
+    def _run_followup_loop(self) -> None:
+        if not self._conversation_should_continue():
+            return
+        while self._conversation_should_continue():
+            remaining = max(0, int(round(self._conversation_deadline - time.monotonic())))
+            self.log_ready.emit(f'Conversation mode: listening for follow-up ({remaining}s left).')
+            transcript, wav_path = self._capture_voice_text('Conversation mode is active. Listening for your follow-up...')
+            if not transcript:
+                self.log_ready.emit('Conversation follow-up timed out.')
+                break
+            if self._is_stop_listening_phrase(transcript):
+                ack = self._idle_acknowledgement()
+                self.response_ready.emit(ack, 'en')
+                self.spoken_text_ready.emit(ack)
+                self._set_state(AssistantState.SPEAKING)
+                backend = self.speaker.speak(ack)
+                self.log_ready.emit(backend)
+                break
+            self._conversation_turns_left -= 1
+            self._refresh_conversation_session()
+            self.log_ready.emit(f'Follow-up captured from {wav_path}. Turns left: {self._conversation_turns_left}')
+            self._run_pipeline(transcript, restart_listener=False, finalize=False)
 
     def _run_microphone_test(self) -> None:
         try:
@@ -314,7 +421,7 @@ class Orchestrator(QObject):
                 self._start_wake_word_listener()
             self._busy = False
 
-    def _run_pipeline(self, text: str, restart_listener: bool) -> None:
+    def _run_pipeline(self, text: str, restart_listener: bool, finalize: bool = True) -> None:
         try:
             self._set_state(AssistantState.LISTENING)
             self.log_ready.emit('Input received.')
@@ -352,9 +459,10 @@ class Orchestrator(QObject):
             self.error_raised.emit(str(exc))
             self.log_ready.emit(f'Error: {exc}')
         finally:
-            if restart_listener and self._enabled and self.config.wake_word_enabled:
-                self._start_wake_word_listener()
-            self._busy = False
+            if finalize:
+                if restart_listener and self._enabled and self.config.wake_word_enabled:
+                    self._start_wake_word_listener()
+                self._busy = False
 
     def _apply_tool_result(self, reply: AssistantReply, result) -> AssistantReply:
         if isinstance(result, WebAnswer):
@@ -395,6 +503,7 @@ class Orchestrator(QObject):
             'answer_web_question': result if result else 'Here is what I found online.',
             'lock_computer': 'Locking the computer.',
             'shutdown_request': 'Shutdown is blocked until you confirm it.',
+            'personal_unavailable': result if result else 'I cannot access that yet.',
         }
         return mapping.get(intent, result[:160] if result else 'Done.')
 

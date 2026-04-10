@@ -145,9 +145,19 @@ class SettingsDialog(QDialog):
         self.background_checkbox = QCheckBox('Keep assistant runtime active in background')
         self.background_checkbox.setChecked(config.keep_assistant_running_in_tray)
 
+        self.conversation_checkbox = QCheckBox('Enable conversation mode after wake')
+        self.conversation_checkbox.setChecked(config.conversation_mode_enabled)
+        self.conversation_timeout_spin = QSpinBox()
+        self.conversation_timeout_spin.setRange(10, 90)
+        self.conversation_timeout_spin.setValue(int(round(config.conversation_timeout_seconds)))
+        self.conversation_turns_spin = QSpinBox()
+        self.conversation_turns_spin.setRange(1, 8)
+        self.conversation_turns_spin.setValue(int(config.conversation_followup_max_turns))
+
         content_layout.addWidget(self._make_general_section())
         content_layout.addWidget(self._make_personality_section())
         content_layout.addWidget(self._make_background_section())
+        content_layout.addWidget(self._make_conversation_section())
         content_layout.addWidget(self._make_audio_section())
         content_layout.addWidget(self._make_web_section())
         content_layout.addWidget(self._make_wake_section())
@@ -211,6 +221,22 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.start_minimized_checkbox)
         layout.addWidget(self._hint('Closing the main window can hide Jarvis to the tray while the wake runtime stays alive.'))
         layout.addWidget(self._hint('Start with Windows writes a user-level startup entry. It is easy to disable later.'))
+        return section
+
+    def _make_conversation_section(self) -> QGroupBox:
+        section = QGroupBox('Conversation mode')
+        layout = QVBoxLayout(section)
+        layout.setSpacing(12)
+        layout.addWidget(self.conversation_checkbox)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+        form.addRow(self._label('Timeout after silence (seconds)'), self.conversation_timeout_spin)
+        form.addRow(self._label('Max follow-up turns'), self.conversation_turns_spin)
+        layout.addLayout(form)
+        layout.addWidget(self._hint('After you wake Jarvis once, he can keep listening for follow-up questions without the wake phrase again.'))
+        layout.addWidget(self._hint('Say stop listening or goodbye to end the session early.'))
         return section
 
     def _make_audio_section(self) -> QGroupBox:
@@ -299,6 +325,9 @@ class SettingsDialog(QDialog):
         self.config.start_with_windows = self.start_with_windows_checkbox.isChecked()
         self.config.start_minimized = self.start_minimized_checkbox.isChecked()
         self.config.keep_assistant_running_in_tray = self.background_checkbox.isChecked()
+        self.config.conversation_mode_enabled = self.conversation_checkbox.isChecked()
+        self.config.conversation_timeout_seconds = float(self.conversation_timeout_spin.value())
+        self.config.conversation_followup_max_turns = int(self.conversation_turns_spin.value())
         self.config.wake_phrases = self.wake_phrases_input.text().strip() or 'Hey Jarvis'
         try:
             self.config.wake_word_threshold = max(0.10, min(0.90, float(self.wake_threshold_input.text().strip())))
@@ -487,10 +516,11 @@ class MainWindow(QMainWindow):
         wake = 'On' if self.config.wake_word_enabled else 'Off'
         web_mode = 'SearXNG' if self.config.searxng_base_url else ('Tavily' if self.config.tavily_api_key else 'Wikipedia fallback')
         bg = 'Tray' if self.config.keep_assistant_running_in_tray else 'Window only'
+        convo = f'Convo: {"On" if self.config.conversation_mode_enabled else "Off"} ({int(self.config.conversation_timeout_seconds)}s)'
         return (
             f'Model: {self.config.model_name}   |   Mic: {self.config.mic_name}   |   '
             f'Lang: {self.config.language_mode}   |   Tone: {self.config.tone_mode}   |   '
-            f'Web: {web_mode}   |   Wake: {wake} ({self.config.wake_word_threshold:.2f})   |   Runtime: {bg}'
+            f'Web: {web_mode}   |   Wake: {wake} ({self.config.wake_word_threshold:.2f})   |   Runtime: {bg}   |   {convo}'
         )
 
     def _personality_text(self) -> str:
@@ -498,7 +528,8 @@ class MainWindow(QMainWindow):
 
     def _orb_subtitle_text(self) -> str:
         phrases = self.config.wake_phrases or 'Hey Jarvis'
-        return f'Preferred wake phrases: {phrases}'
+        convo = 'Conversation mode on' if self.config.conversation_mode_enabled else 'Conversation mode off'
+        return f'Preferred wake phrases: {phrases}\n{convo}'
 
     def _make_card(self, parent_layout: QVBoxLayout, title: str) -> QTextEdit:
         card = QFrame(objectName='Card')
