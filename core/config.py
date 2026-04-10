@@ -28,7 +28,7 @@ class AppConfig:
     command_silence_seconds: float = 1.1
     accent_assist_enabled: bool = True
     tavily_api_key: str = ""
-    searxng_base_url: str = ""
+    searxng_base_url: str = "http://localhost:8888"
     web_max_results: int = 5
     web_timeout_seconds: float = 12.0
 
@@ -56,7 +56,10 @@ class AppConfig:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return cls()
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        cfg = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if not str(cfg.searxng_base_url).strip():
+            cfg.searxng_base_url = "http://localhost:8888"
+        return cfg
 
     def save(self, path: Path) -> None:
         path.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")

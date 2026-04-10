@@ -113,7 +113,7 @@ class SettingsDialog(QDialog):
         self.whisper_cpp_input.setPlaceholderText('Optional: path to whisper-cli.exe')
 
         self.searxng_url_input = QLineEdit(config.searxng_base_url)
-        self.searxng_url_input.setPlaceholderText('Optional: SearXNG instance URL, e.g. http://localhost:8080')
+        self.searxng_url_input.setPlaceholderText('Default: http://localhost:8888')
         self.web_results_spin = QSpinBox()
         self.web_results_spin.setRange(2, 8)
         self.web_results_spin.setValue(max(2, min(8, int(config.web_max_results))))
