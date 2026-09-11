@@ -7,7 +7,16 @@ from pathlib import Path
 
 @dataclass
 class AppConfig:
-    model_name: str = "gemma3:4b"
+    # AI / agent provider
+    ai_provider: str = "LM Studio"
+    ai_base_url: str = "http://127.0.0.1:1234/v1"
+    ai_model_name: str = "jarvis-qwen"
+    ai_api_key: str = "lm-studio"
+    ai_timeout_seconds: float = 60.0
+    ai_max_tool_rounds: int = 6
+    ai_temperature: float = 0.35
+    conversation_history_turns: int = 12
+
     language_mode: str = "Auto"
     mic_name: str = "Default"
     speaker_name: str = "Default"
@@ -64,9 +73,22 @@ class AppConfig:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return cls()
+
+        # Backward compatibility with the old Ollama-era config.
+        if "model_name" in data and "ai_model_name" not in data:
+            data["ai_model_name"] = "jarvis-qwen"
+        if "ai_base_url" not in data:
+            data["ai_base_url"] = "http://127.0.0.1:1234/v1"
+        if "ai_provider" not in data:
+            data["ai_provider"] = "LM Studio"
+
         cfg = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         if not str(cfg.searxng_base_url).strip():
             cfg.searxng_base_url = "http://localhost:8888"
+        if not str(cfg.ai_base_url).strip():
+            cfg.ai_base_url = "http://127.0.0.1:1234/v1"
+        if not str(cfg.ai_model_name).strip():
+            cfg.ai_model_name = "jarvis-qwen"
         return cfg
 
     def save(self, path: Path) -> None:

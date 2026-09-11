@@ -89,12 +89,21 @@ class WebAnswer:
 
 
 def open_website(site: str) -> str:
-    key = site.lower().strip()
+    raw = site.strip()
+    if not raw:
+        return "No website was provided."
+    key = raw.lower()
     url = KNOWN_SITES.get(key)
     if not url:
-        return f"I do not know the website '{site}' yet."
+        # Allow normal domains/URLs without hard-coding every website Jarvis may ever use.
+        if re.fullmatch(r"https?://[^\s]+", raw, re.IGNORECASE):
+            url = raw
+        elif re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?", key, re.IGNORECASE):
+            url = f"https://{raw}"
+        else:
+            return f"I do not recognize '{site}' as a website or domain."
     webbrowser.open(url)
-    return f"Opened {key}."
+    return f"Opened {url}."
 
 
 def search_web(query: str) -> str:

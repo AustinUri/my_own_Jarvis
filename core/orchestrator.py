@@ -10,10 +10,9 @@ from PySide6.QtCore import QObject, Signal
 
 from core.config import AppConfig
 from core.events import AssistantReply, AssistantState
-from llm.brain import Brain
+from agent.jarvis_agent import JarvisAgent
 from stt.whisper_engine import WhisperEngine
 from tools.registry import ToolRegistry
-from tools.web_tools import WebAnswer
 from tts.speaker import Speaker
 from wakeword.listener import WakeWordEvent, WakeWordListener
 
@@ -39,8 +38,8 @@ class Orchestrator(QObject):
         super().__init__()
         self.base_dir = base_dir
         self.config = config
-        self.brain = Brain(config)
         self.tools = ToolRegistry(base_dir, config)
+        self.agent = JarvisAgent(config, self.tools, log=self.log_ready.emit)
         self.speaker = Speaker(config)
         self.aliases_path = base_dir / 'memory' / 'custom_aliases.json'
         self._ensure_custom_aliases_file()
@@ -93,8 +92,9 @@ class Orchestrator(QObject):
         self.whisper.command_min_seconds = self.config.command_min_seconds
         self.whisper.command_preroll_seconds = self.config.command_preroll_seconds
         self.whisper._model = None
-        self.brain.config = self.config
         self.tools.config = self.config
+        self.agent.config = self.config
+        self.agent.reload_config()
         self.speaker.config = self.config
         self.wake_listener.threshold = self.config.wake_word_threshold
         self.wake_listener.mic_name = self.config.mic_name
@@ -418,7 +418,7 @@ class Orchestrator(QObject):
             self._set_state(AssistantState.LISTENING)
             self.log_ready.emit(f'Microphone test started on {self.config.mic_name}. Speak now.')
             transcript, wav_path = self.whisper.transcribe_microphone_command(max_seconds=5.0, silence_seconds=1.0, threshold=self.config.silence_threshold)
-            language = self.brain.detect_language(transcript or '')
+            language = self.agent.detect_language(transcript or '')
             self.transcript_ready.emit(transcript or '[nothing heard]', language)
             self.log_ready.emit(f'Mic test audio saved as {wav_path}.')
             if transcript:
@@ -468,24 +468,21 @@ class Orchestrator(QObject):
         try:
             self._set_state(AssistantState.LISTENING)
             self.log_ready.emit('Input received.')
-            time.sleep(0.08)
+            time.sleep(0.05)
 
-            language = self.brain.detect_language(text)
+            language = self.agent.detect_language(text)
             self._set_state(AssistantState.TRANSCRIBING)
             self.transcript_ready.emit(text, language)
             self.log_ready.emit('Transcript updated.')
-            time.sleep(0.12)
+            time.sleep(0.05)
 
             self._set_state(AssistantState.THINKING)
-            reply = self.brain.build_reply(text)
+            reply = self.agent.process(text)
             self.log_ready.emit(f'Intent: {reply.intent}')
-
-            if reply.tool is not None:
-                result = self.tools.run(reply.tool)
-                reply = self._apply_tool_result(reply, result)
-                self.log_ready.emit(f'Tool executed: {reply.tool.name}')
-                if isinstance(result, WebAnswer):
-                    self.log_ready.emit(f'Web provider: {result.provider}')
+            if reply.provider:
+                self.log_ready.emit(f'AI provider: {reply.provider}')
+            for tool_name in reply.tool_trace:
+                self.log_ready.emit(f'Agent tool: {tool_name}')
 
             self.response_ready.emit(reply.gui_text, reply.user_language)
             self.spoken_text_ready.emit(reply.spoken_text)
@@ -511,48 +508,11 @@ class Orchestrator(QObject):
                     self._start_wake_word_listener()
                 self._busy = False
 
-    def _apply_tool_result(self, reply: AssistantReply, result) -> AssistantReply:
-        if isinstance(result, WebAnswer):
-            candidate = AssistantReply(
-                user_language=reply.user_language,
-                intent=reply.intent,
-                gui_text=result.to_gui_text(),
-                spoken_text=result.spoken_text,
-                tool=reply.tool,
-                raw_user_text=reply.raw_user_text,
-            )
-            return self.brain._apply_personality(candidate)
-        result_text = str(result)
-        spoken = self._to_spoken_english(reply.intent, result_text)
-        candidate = AssistantReply(
-            user_language=reply.user_language,
-            intent=reply.intent,
-            gui_text=result_text,
-            spoken_text=spoken,
-            tool=reply.tool,
-            raw_user_text=reply.raw_user_text,
-        )
-        return self.brain._apply_personality(candidate)
+    def clear_conversation_memory(self) -> None:
+        self.agent.clear_memory()
 
-    def _to_spoken_english(self, intent: str, result: str) -> str:
-        mapping = {
-            'open_app': 'Opening complete.',
-            'close_app': 'Closing complete.',
-            'open_website': 'Website opened.',
-            'search_web': 'Web search opened.',
-            'open_folder': 'Folder opened.',
-            'tell_time': result if result else 'Here is the time.',
-            'tell_date': result if result else 'Here is the date.',
-            'system_status': result if result else 'Here is the system status.',
-            'calculate': result if result else 'Calculation completed.',
-            'create_note': 'Your note was created.',
-            'search_files': 'File search completed.',
-            'answer_web_question': result if result else 'Here is what I found online.',
-            'lock_computer': 'Locking the computer.',
-            'shutdown_request': 'Shutdown is blocked until you confirm it.',
-            'personal_unavailable': result if result else 'I cannot access that yet.',
-        }
-        return mapping.get(intent, result[:160] if result else 'Done.')
+    def ai_provider_status(self) -> str:
+        return self.agent.provider_status()
 
     def _set_state(self, state: AssistantState) -> None:
         self._state = state

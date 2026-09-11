@@ -81,6 +81,7 @@ class WhisperEngine:
         self.base_dir = Path(base_dir) if base_dir else None
         self._model = None
         self._backend = None
+        self._force_cpu = False
 
     def transcribe_microphone_command(
         self,
@@ -203,8 +204,23 @@ class WhisperEngine:
     def _transcribe_faster_whisper(self, audio_path: str, command_mode: bool) -> str:
         model = self._get_model()
         kwargs = self._build_transcribe_kwargs(command_mode=command_mode)
-        segments, _info = model.transcribe(audio_path, **kwargs)
-        return ' '.join(segment.text.strip() for segment in segments).strip()
+        try:
+            segments, _info = model.transcribe(audio_path, **kwargs)
+            return ' '.join(segment.text.strip() for segment in segments).strip()
+        except Exception as exc:
+            # On Windows, CTranslate2 can instantiate the CUDA model and only
+            # discover a missing cublas/cudnn DLL when transcription actually
+            # starts. Fall back to CPU automatically instead of killing the
+            # conversation with a CUDA runtime error.
+            message = str(exc).lower()
+            cuda_problem = any(token in message for token in ('cublas', 'cudnn', 'cuda', 'gpu'))
+            if not self._force_cpu and (self._backend == 'faster-whisper:cuda' or cuda_problem):
+                self._force_cpu = True
+                self._model = None
+                cpu_model = self._get_model()
+                segments, _info = cpu_model.transcribe(audio_path, **kwargs)
+                return ' '.join(segment.text.strip() for segment in segments).strip()
+            raise
 
     def _transcribe_whisper_cpp(self, audio_path: str, command_mode: bool) -> str:
         exe = self._find_whisper_cpp_executable()
@@ -436,10 +452,14 @@ class WhisperEngine:
 
         from faster_whisper import WhisperModel
 
-        try:
-            self._model = WhisperModel(self.model_name, device='cuda', compute_type='int8_float16')
-            self._backend = 'faster-whisper:cuda'
-        except Exception:
-            self._model = WhisperModel(self.model_name, device='cpu', compute_type='int8')
-            self._backend = 'faster-whisper:cpu'
+        if not self._force_cpu:
+            try:
+                self._model = WhisperModel(self.model_name, device='cuda', compute_type='int8_float16')
+                self._backend = 'faster-whisper:cuda'
+                return self._model
+            except Exception:
+                self._force_cpu = True
+
+        self._model = WhisperModel(self.model_name, device='cpu', compute_type='int8')
+        self._backend = 'faster-whisper:cpu'
         return self._model

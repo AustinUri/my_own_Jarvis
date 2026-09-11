@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
 import re
-import urllib.error
-import urllib.request
-from typing import Any
 
 from core.config import AppConfig
 from core.events import AssistantReply, ToolAction
@@ -58,15 +54,11 @@ class Brain:
         return None
 
     def build_reply(self, user_text: str) -> AssistantReply:
+        """Degraded deterministic fallback used only when the real AI provider is offline."""
         language = self.detect_language(user_text)
         personal_reply = self._personal_domain_reply(user_text, language)
         if personal_reply is not None:
             return self._apply_personality(personal_reply)
-        ollama_reply = self._try_ollama(user_text, language)
-        if ollama_reply is not None:
-            if ollama_reply.intent == "answer_web_question" and self._personal_domain_reply(user_text, language) is not None:
-                return self._apply_personality(self._personal_domain_reply(user_text, language))
-            return self._apply_personality(ollama_reply)
         return self._apply_personality(self._fallback_reply(user_text, language))
 
     def _assistant_style_prompt(self) -> str:
@@ -83,77 +75,6 @@ class Brain:
         if self.config.ask_before_open_related_apps:
             rules.append("If opening a related app could help but was not explicitly requested, suggest it briefly instead of opening it automatically.")
         return " ".join(rules)
-
-    def _try_ollama(self, user_text: str, language: str) -> AssistantReply | None:
-        system_prompt = (
-            "You are the brain of a local desktop assistant named Jarvis. "
-            "Return strict JSON only with keys: user_language, intent, gui_text, spoken_text, tool. "
-            "The user_language must be 'he' or 'en'. gui_text should match the user's language. "
-            "spoken_text must be concise English. tool must be null or an object with keys name and args. "
-            "Prefer these tools only when relevant: open_app, close_app, open_website, search_web, answer_web_question, open_folder, "
-            "tell_time, tell_date, system_status, calculate, create_note, search_files, lock_computer, shutdown_request. "
-            "For factual or current-event questions, prefer answer_web_question. Never use web search for the user's personal schedule, calendar, reminders, notes, messages, or inbox. For unsupported personal data requests, say you cannot access that personal information yet. "
-            f"{self._assistant_style_prompt()} "
-            "Never output markdown. Never invent unsupported tools."
-        )
-        payload: dict[str, Any] = {
-            "model": self.config.model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
-            ],
-            "stream": False,
-            "format": {
-                "type": "object",
-                "properties": {
-                    "user_language": {"type": "string"},
-                    "intent": {"type": "string"},
-                    "gui_text": {"type": "string"},
-                    "spoken_text": {"type": "string"},
-                    "tool": {
-                        "type": ["object", "null"],
-                        "properties": {
-                            "name": {"type": "string"},
-                            "args": {"type": "object"},
-                        },
-                        "required": ["name", "args"],
-                        "additionalProperties": False,
-                    },
-                },
-                "required": ["user_language", "intent", "gui_text", "spoken_text", "tool"],
-                "additionalProperties": False,
-            },
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            "http://127.0.0.1:11434/api/chat",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=12) as response:
-                raw = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-            return None
-
-        try:
-            content = raw["message"]["content"]
-            parsed = json.loads(content)
-            tool = parsed.get("tool")
-            tool_action = None
-            if isinstance(tool, dict):
-                tool_action = ToolAction(name=tool["name"], args=tool.get("args", {}))
-            return AssistantReply(
-                user_language=parsed.get("user_language", language),
-                intent=parsed.get("intent", "chat"),
-                gui_text=parsed["gui_text"],
-                spoken_text=parsed["spoken_text"],
-                tool=tool_action,
-                raw_user_text=user_text,
-            )
-        except (KeyError, TypeError, json.JSONDecodeError):
-            return None
 
     def _fallback_reply(self, user_text: str, language: str) -> AssistantReply:
         lowered = user_text.lower().strip()

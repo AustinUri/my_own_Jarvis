@@ -31,6 +31,8 @@ class AssistantReply:
     spoken_text: str
     tool: ToolAction | None = None
     raw_user_text: str = ""
+    tool_trace: list[str] = field(default_factory=list)
+    provider: str = ""
 
 
 @dataclass(slots=True)

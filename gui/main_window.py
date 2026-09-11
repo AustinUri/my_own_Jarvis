@@ -70,9 +70,19 @@ class SettingsDialog(QDialog):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(14)
 
-        self.model_combo = QComboBox()
-        self.model_combo.addItems(['gemma3:4b', 'llama3.1:8b', 'qwen2.5:7b'])
-        self.model_combo.setCurrentText(config.model_name)
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItems(['LM Studio', 'OpenAI-compatible'])
+        self.ai_provider_combo.setCurrentText(config.ai_provider if config.ai_provider in ['LM Studio', 'OpenAI-compatible'] else 'LM Studio')
+        self.ai_base_url_input = QLineEdit(config.ai_base_url)
+        self.ai_base_url_input.setPlaceholderText('http://127.0.0.1:1234/v1')
+        self.ai_model_input = QLineEdit(config.ai_model_name)
+        self.ai_model_input.setPlaceholderText('jarvis-qwen (recommended identifier)')
+        self.ai_api_key_input = QLineEdit(config.ai_api_key)
+        self.ai_api_key_input.setEchoMode(QLineEdit.Password)
+        self.ai_api_key_input.setPlaceholderText('lm-studio (or provider API key)')
+        self.ai_history_spin = QSpinBox()
+        self.ai_history_spin.setRange(2, 30)
+        self.ai_history_spin.setValue(max(2, min(30, int(config.conversation_history_turns))))
 
         self.language_combo = QComboBox()
         self.language_combo.addItems(['Auto', 'Hebrew', 'English'])
@@ -162,6 +172,7 @@ class SettingsDialog(QDialog):
         self.command_min_spin.setRange(1, 5)
         self.command_min_spin.setValue(int(round(config.command_min_seconds)))
 
+        content_layout.addWidget(self._make_ai_section())
         content_layout.addWidget(self._make_general_section())
         content_layout.addWidget(self._make_personality_section())
         content_layout.addWidget(self._make_background_section())
@@ -189,6 +200,23 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
 
+    def _make_ai_section(self) -> QGroupBox:
+        section = QGroupBox('AI brain')
+        layout = QVBoxLayout(section)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+        form.addRow(self._label('Provider'), self.ai_provider_combo)
+        form.addRow(self._label('OpenAI-compatible base URL'), self.ai_base_url_input)
+        form.addRow(self._label('Model identifier'), self.ai_model_input)
+        form.addRow(self._label('API key'), self.ai_api_key_input)
+        form.addRow(self._label('Conversation memory (turns)'), self.ai_history_spin)
+        layout.addLayout(form)
+        layout.addWidget(self._hint('Recommended: LM Studio on http://127.0.0.1:1234/v1 with Qwen3.5 9B loaded as identifier “jarvis-qwen”.'))
+        layout.addWidget(self._hint('Jarvis now uses real model tool-calling and recent conversation history. Ollama is no longer required.'))
+        return section
+
     def _make_general_section(self) -> QGroupBox:
         section = QGroupBox('General')
         layout = QFormLayout(section)
@@ -196,7 +224,6 @@ class SettingsDialog(QDialog):
         layout.setFormAlignment(Qt.AlignTop)
         layout.setHorizontalSpacing(18)
         layout.setVerticalSpacing(12)
-        layout.addRow(self._label('Model'), self.model_combo)
         layout.addRow(self._label('Language mode'), self.language_combo)
         layout.addRow(self._label('Speech-to-text backend'), self.stt_backend_combo)
         layout.addRow(self._label('Speech-to-text model'), self.stt_combo)
@@ -316,7 +343,11 @@ class SettingsDialog(QDialog):
         return label
 
     def apply(self) -> None:
-        self.config.model_name = self.model_combo.currentText()
+        self.config.ai_provider = self.ai_provider_combo.currentText()
+        self.config.ai_base_url = self.ai_base_url_input.text().strip() or 'http://127.0.0.1:1234/v1'
+        self.config.ai_model_name = self.ai_model_input.text().strip() or 'jarvis-qwen'
+        self.config.ai_api_key = self.ai_api_key_input.text().strip() or 'lm-studio'
+        self.config.conversation_history_turns = int(self.ai_history_spin.value())
         self.config.language_mode = self.language_combo.currentText()
         self.config.mic_name = self.mic_combo.currentText()
         self.config.stt_backend = self.stt_backend_combo.currentText()
@@ -424,6 +455,7 @@ class MainWindow(QMainWindow):
         self.voice_button = QPushButton('Mute Voice' if self.config.voice_enabled else 'Unmute Voice')
         self.voice_test_button = QPushButton('Test Voice')
         self.mic_test_button = QPushButton('Test Mic')
+        self.ai_test_button = QPushButton('Test AI')
         self.wake_button = QPushButton('Disable Wake Word' if self.config.wake_word_enabled else 'Enable Wake Word')
         self.ptt_button = QPushButton('Push-to-talk')
         self.hide_button = QPushButton('Hide to Tray')
@@ -434,7 +466,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.status_text)
         sidebar_layout.addWidget(self.personality_text)
         sidebar_layout.addSpacing(8)
-        for button in [self.toggle_button, self.voice_button, self.voice_test_button, self.mic_test_button, self.wake_button, self.ptt_button, self.hide_button, self.history_button, self.settings_button]:
+        for button in [self.toggle_button, self.voice_button, self.voice_test_button, self.mic_test_button, self.ai_test_button, self.wake_button, self.ptt_button, self.hide_button, self.history_button, self.settings_button]:
             sidebar_layout.addWidget(button)
         sidebar_layout.addStretch(1)
 
@@ -534,7 +566,7 @@ class MainWindow(QMainWindow):
         bg = 'Tray' if self.config.keep_assistant_running_in_tray else 'Window only'
         convo = f'Convo: {"On" if self.config.conversation_mode_enabled else "Off"} ({int(self.config.conversation_timeout_seconds)}s)'
         return (
-            f'Model: {self.config.model_name}   |   Mic: {self.config.mic_name}   |   '
+            f'AI: {self.config.ai_provider} / {self.config.ai_model_name}   |   Mic: {self.config.mic_name}   |   '
             f'Lang: {self.config.language_mode}   |   Tone: {self.config.tone_mode}   |   '
             f'Web: {web_mode}   |   Wake: {wake} ({self.config.wake_word_threshold:.2f})   |   Runtime: {bg}   |   {convo}'
         )
@@ -570,6 +602,7 @@ class MainWindow(QMainWindow):
         self.voice_button.clicked.connect(self._toggle_voice)
         self.voice_test_button.clicked.connect(self._test_voice)
         self.mic_test_button.clicked.connect(self._test_mic)
+        self.ai_test_button.clicked.connect(self._test_ai)
         self.wake_button.clicked.connect(self._toggle_wake_word)
         self.hide_button.clicked.connect(self.hide_to_tray)
         self.history_button.clicked.connect(self._clear_history)
@@ -606,6 +639,11 @@ class MainWindow(QMainWindow):
     def _test_mic(self) -> None:
         self.orchestrator.test_microphone()
 
+    def _test_ai(self) -> None:
+        status = self.orchestrator.ai_provider_status()
+        self._log(status)
+        QMessageBox.information(self, 'Jarvis AI', status)
+
     def _toggle_wake_word(self) -> None:
         self.orchestrator.toggle_wake_word()
         self.wake_button.setText('Disable Wake Word' if self.config.wake_word_enabled else 'Enable Wake Word')
@@ -619,7 +657,8 @@ class MainWindow(QMainWindow):
         self.transcript_box.clear()
         self.response_box.clear()
         self.spoken_box.clear()
-        self._log('History cleared.')
+        self.orchestrator.clear_conversation_memory()
+        self._log('UI history and recent AI conversation memory cleared.')
 
     def _open_settings(self) -> None:
         previous_autostart = self.config.start_with_windows
