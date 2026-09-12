@@ -27,6 +27,9 @@ UI_MUTATING_TOOLS = {
     "ui_show_panel",
     "ui_hide_panel",
     "ui_switch_workspace",
+    "ui_create_workspace",
+    "calendar_connect",
+    "calendar_create_event",
 }
 
 PRIVATE_WEB_BLOCK_TOOLS = {"answer_web_question", "search_web"}

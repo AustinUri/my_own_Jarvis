@@ -1,10 +1,146 @@
 [
-  {"id":"orb","title":"JARVIS Core","category":"core","default":{"w":6,"h":7}},
-  {"id":"conversation","title":"Conversation","category":"core","default":{"w":6,"h":10}},
-  {"id":"activity","title":"Agent Activity","category":"debug","default":{"w":4,"h":6}},
-  {"id":"sources","title":"Sources","category":"research","default":{"w":4,"h":7}},
-  {"id":"system","title":"System Monitor","category":"system","default":{"w":3,"h":5}},
-  {"id":"context","title":"Context","category":"core","default":{"w":3,"h":5}},
-  {"id":"camera","title":"Camera","category":"vision","permissions":["camera"],"default":{"w":6,"h":9}},
-  {"id":"settings","title":"Settings","category":"system","default":{"w":5,"h":7}}
+  {
+    "id": "orb",
+    "title": "JARVIS Core",
+    "category": "core",
+    "default": {
+      "w": 6,
+      "h": 9
+    }
+  },
+  {
+    "id": "conversation",
+    "title": "Conversation",
+    "category": "core",
+    "default": {
+      "w": 6,
+      "h": 10
+    }
+  },
+  {
+    "id": "briefing",
+    "title": "Daily Briefing",
+    "category": "intelligence",
+    "default": {
+      "w": 6,
+      "h": 10
+    }
+  },
+  {
+    "id": "weather",
+    "title": "Weather",
+    "category": "intelligence",
+    "default": {
+      "w": 3,
+      "h": 5
+    }
+  },
+  {
+    "id": "calendar",
+    "title": "Calendar",
+    "category": "personal",
+    "permissions": [
+      "google_calendar"
+    ],
+    "default": {
+      "w": 4,
+      "h": 7
+    }
+  },
+  {
+    "id": "phone",
+    "title": "Phone Link",
+    "category": "personal",
+    "permissions": [
+      "native_calendar_read"
+    ],
+    "default": {
+      "w": 4,
+      "h": 7
+    }
+  },
+  {
+    "id": "sports",
+    "title": "Champions League",
+    "category": "sports",
+    "default": {
+      "w": 5,
+      "h": 8
+    }
+  },
+  {
+    "id": "learning",
+    "title": "F1 Learning",
+    "category": "learning",
+    "default": {
+      "w": 4,
+      "h": 6
+    }
+  },
+  {
+    "id": "services",
+    "title": "Runtime Services",
+    "category": "system",
+    "default": {
+      "w": 3,
+      "h": 5
+    }
+  },
+  {
+    "id": "activity",
+    "title": "Agent Activity",
+    "category": "debug",
+    "default": {
+      "w": 5,
+      "h": 8
+    }
+  },
+  {
+    "id": "sources",
+    "title": "Sources",
+    "category": "research",
+    "default": {
+      "w": 5,
+      "h": 9
+    }
+  },
+  {
+    "id": "system",
+    "title": "System Monitor",
+    "category": "system",
+    "default": {
+      "w": 3,
+      "h": 5
+    }
+  },
+  {
+    "id": "context",
+    "title": "Context",
+    "category": "core",
+    "default": {
+      "w": 4,
+      "h": 5
+    }
+  },
+  {
+    "id": "camera",
+    "title": "Camera / Vision",
+    "category": "vision",
+    "permissions": [
+      "camera"
+    ],
+    "default": {
+      "w": 4,
+      "h": 7
+    }
+  },
+  {
+    "id": "settings",
+    "title": "Settings",
+    "category": "system",
+    "default": {
+      "w": 5,
+      "h": 8
+    }
+  }
 ]

@@ -67,7 +67,7 @@ third_party/
 # Local runtime config (contains API keys)
 config.json
 
-# JARVIS v23 workspace frontend
+# JARVIS v26 workspace frontend
 workspace_ui/node_modules/
 # The zero-build runtime bundle is intentionally versioned.
 !workspace_ui/dist/

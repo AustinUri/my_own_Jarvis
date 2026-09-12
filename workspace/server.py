@@ -60,13 +60,17 @@ class WorkspaceServer:
         config,
         command_handler: Callable[[dict[str, Any]], None],
         snapshot_provider: Callable[[], dict[str, Any]],
+        profile_store=None,
+        on_client_connected: Callable[[], None] | None = None,
     ) -> None:
         self.base_dir = base_dir
         self.config = config
         self.command_handler = command_handler
         self.snapshot_provider = snapshot_provider
+        self.profile_store = profile_store
+        self.on_client_connected = on_client_connected
         self.manager = WorkspaceConnectionManager()
-        self.app = FastAPI(title="JARVIS Workspace API", version="23")
+        self.app = FastAPI(title="JARVIS Workspace API", version="26")
         self._configure_routes()
 
     def _configure_routes(self) -> None:
@@ -82,7 +86,24 @@ class WorkspaceServer:
 
         @app.get("/api/health")
         async def health() -> dict[str, Any]:
-            return {"ok": True, "version": 23}
+            return {"ok": True, "version": 26}
+
+        @app.get("/api/profiles")
+        async def profiles() -> JSONResponse:
+            return JSONResponse(self.profile_store.list() if self.profile_store is not None else {})
+
+        @app.post("/api/profiles/{name}")
+        async def save_profile(name: str, payload: dict[str, Any]) -> JSONResponse:
+            if self.profile_store is None:
+                return JSONResponse({"ok": False, "error": "Profile store unavailable"}, status_code=503)
+            saved = self.profile_store.save(name, payload)
+            return JSONResponse({"ok": True, "profile": saved})
+
+        @app.delete("/api/profiles/{name}")
+        async def delete_profile(name: str) -> JSONResponse:
+            if self.profile_store is None:
+                return JSONResponse({"ok": False}, status_code=503)
+            return JSONResponse({"ok": self.profile_store.delete(name)})
 
         @app.get("/api/snapshot")
         async def snapshot() -> JSONResponse:
@@ -101,6 +122,11 @@ class WorkspaceServer:
             await manager.connect(websocket)
             try:
                 await websocket.send_text(json.dumps({"type": "snapshot", "payload": self.snapshot_provider()}, ensure_ascii=False, default=str))
+                if self.on_client_connected is not None:
+                    try:
+                        self.on_client_connected()
+                    except Exception:
+                        pass
                 while True:
                     raw = await websocket.receive_text()
                     try:

@@ -59,6 +59,36 @@ class JarvisAgent:
         except ProviderError as exc:
             return str(exc)
 
+    def analyze_camera_frame(self, data_url: str, prompt: str) -> str:
+        """Analyze one explicitly shared camera frame with the configured VLM.
+
+        The workspace owns camera permission and supplies only the latest frame.
+        This method never opens the camera itself.
+        """
+        question = (prompt or "Describe what is visible in the camera.").strip()
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are JARVIS visual perception. Describe only what is visibly supported by the image. "
+                    "Do not identify unknown people by name and do not infer sensitive personal traits. "
+                    "Be concise and practical."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": question},
+                    {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}},
+                ],
+            },
+        ]
+        message = self._provider.chat(messages=messages, tools=None, temperature=0.15)
+        content = str(message.get("content") or "").strip()
+        if not content:
+            raise ProviderError("The vision model returned an empty response.")
+        return content
+
     def process(self, user_text: str) -> AssistantReply:
         language = self.detect_language(user_text)
         policy = RequestPolicy.from_text(user_text)
@@ -88,7 +118,9 @@ class JarvisAgent:
         tool_trace: list[str] = []
 
         max_rounds = max(1, min(10, int(self.config.ai_max_tool_rounds)))
+        self.log("Agent: reasoning started.")
         for _round in range(max_rounds):
+            self.log(f"Agent: model round {_round + 1} of {max_rounds}.")
             assistant_message = self._provider.chat(
                 messages=messages,
                 tools=tools,
@@ -101,13 +133,15 @@ class JarvisAgent:
                     tool_call_id, name, args = self._parse_tool_call(call)
                     allowed, reason = policy.authorize(name, self.config.auto_open_explicit_only)
                     if allowed:
+                        arg_preview = json.dumps(args, ensure_ascii=False, default=str)[:360] if args else ""
+                        self.log(f"Tool requested: {name}{' ' + arg_preview if arg_preview else ''}")
                         result = self.tools.run(ToolAction(name=name, args=args))
                         model_result = self.tools.result_for_model(result)
                         tool_trace.append(name)
                         if isinstance(result, WebAnswer):
-                            self.log(f"Tool: {name} via {result.provider}")
+                            self.log(f"Tool completed: {name} via {result.provider}")
                         else:
-                            self.log(f"Tool: {name}")
+                            self.log(f"Tool completed: {name}")
                     else:
                         model_result = f"TOOL DENIED BY POLICY: {reason}"
                         tool_trace.append(f"{name} (denied)")
@@ -124,6 +158,7 @@ class JarvisAgent:
             content = str(assistant_message.get("content") or "").strip()
             if not content:
                 raise ProviderError("The model returned neither a reply nor a tool call.")
+            self.log("Agent: final response ready.")
             parsed = self._parse_final_response(content, language)
             return AssistantReply(
                 user_language=language,
@@ -174,9 +209,15 @@ class JarvisAgent:
             "Only open, close, show, launch, navigate, lock, or otherwise change the user's UI when the user explicitly asks for that action. "
             "If an app/site could help but was not requested, offer it briefly instead of opening it. "
             "Use answer_web_question for public facts/current information that benefit from internet research. "
+            "Use get_weather for weather instead of generic web search whenever possible. "
+            "Use calendar_list_events for the user's personal schedule and calendar_status/calendar_connect for Google Calendar access; never replace personal calendar data with public web search. "
+            "Use get_daily_briefing when the user asks for their briefing, what they missed, today's update, sports/news roundup, or a refresh of the daily intelligence feed. "
+            "Use f1_next_lesson when the user asks to learn something new about Formula 1, and teach from that progression instead of repeating the same basics. "
+            "For exhaustive, historical, list, range, season, tournament, or 'all/since/from/back to YEAR' requests, use answer_web_question and fulfill the whole requested range from the returned evidence. Do not silently shorten the request to a few examples. If evidence is incomplete, say exactly which portion you could not verify. "
             "Never substitute public web search for private data such as the user's schedule, calendar, inbox, private messages, or reminders. "
-            "When answer_web_question returns sources, include a short Sources section in gui_text, but do not read URLs aloud in spoken_text. "
-            "The JARVIS workspace itself is controllable through ui_show_panel, ui_hide_panel, and ui_switch_workspace. Use those only when the user explicitly asks to change what the interface shows or which workspace is active. "
+            "When answer_web_question returns sources, synthesize the evidence into a clean answer or table; never dump raw evidence/HTML. Include a short Sources section in gui_text, but do not read URLs aloud in spoken_text. "
+            "The JARVIS workspace itself is controllable through ui_show_panel, ui_hide_panel, and ui_switch_workspace. Custom saved workspace names are valid; use those tools only when the user explicitly asks to change what the interface shows or which mode/workspace is active. "
+            "When the user explicitly asks what you can see, whether you can see them, or asks you to inspect the enabled camera, call analyze_camera. Never claim camera vision without that tool result. "
             "If a capability is unavailable, say so plainly rather than inventing access. "
             "You have no raw shell access. Use only the provided tools. "
             "After all required tool calls finish, return ONLY a compact JSON object with keys intent, gui_text, spoken_text. "

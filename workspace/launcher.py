@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
-import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -13,140 +12,330 @@ from PySide6.QtWidgets import QApplication
 
 from core.config import AppConfig
 from core.orchestrator import Orchestrator
+from core.service_manager import ServiceManager
 from workspace.bridge import WorkspaceBridge
+from workspace.profiles import WorkspaceProfileStore
 from workspace.server import WorkspaceServer
 from workspace.tray import WorkspaceTray
+from workspace.activity import ActivityTimeline
+from vision.camera_state import CameraState
+from phone.bridge import CompanionHub
+from phone.server import PhoneBridgeServer
 
 
 class CommandRouter(QObject):
     incoming = Signal(dict)
 
-    def __init__(self, bridge: WorkspaceBridge):
+    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CompanionHub):
         super().__init__()
         self.bridge = bridge
+        self.camera_state = camera_state
+        self.publish = publish
+        self.orchestrator = orchestrator
+        self.phone_hub = phone_hub
         self.incoming.connect(self._dispatch)
+
+    def _thread(self, target, name: str) -> None:
+        threading.Thread(target=target, name=name, daemon=True).start()
 
     @Slot(dict)
     def _dispatch(self, message: dict) -> None:
-        action = str(message.get("action") or "").strip()
-        payload = message.get("payload") or {}
-        if action == "submit_text":
-            self.bridge.submit_text.emit(str(payload.get("text") or ""))
-        elif action == "push_to_talk":
+        action = str(message.get('action') or '').strip()
+        payload = message.get('payload') or {}
+        if action == 'submit_text':
+            self.bridge.submit_text.emit(str(payload.get('text') or ''))
+        elif action == 'push_to_talk':
             self.bridge.push_to_talk.emit()
-        elif action == "test_microphone":
+        elif action == 'test_microphone':
             self.bridge.test_microphone.emit()
-        elif action == "test_voice":
+        elif action == 'test_voice':
             self.bridge.test_voice.emit()
-        elif action == "set_assistant_enabled":
-            self.bridge.set_assistant_enabled.emit(bool(payload.get("enabled", True)))
-        elif action == "toggle_voice":
+        elif action == 'set_assistant_enabled':
+            self.bridge.set_assistant_enabled.emit(bool(payload.get('enabled', True)))
+        elif action == 'toggle_voice':
             self.bridge.toggle_voice.emit()
-        elif action == "toggle_wake_word":
+        elif action == 'toggle_wake_word':
             self.bridge.toggle_wake_word.emit()
-        elif action == "clear_memory":
+        elif action == 'clear_memory':
             self.bridge.clear_memory.emit()
-        elif action == "config_patch":
+        elif action == 'config_patch':
             self.bridge.apply_config_patch(dict(payload))
+        elif action == 'camera_enabled':
+            self.camera_state.set_enabled(True)
+            self.publish('camera_status', self.camera_state.status())
+        elif action == 'camera_disabled':
+            self.camera_state.set_enabled(False)
+            self.publish('camera_status', self.camera_state.status())
+        elif action == 'camera_frame':
+            accepted = self.camera_state.update(
+                str(payload.get('data_url') or ''),
+                int(payload.get('width') or 0),
+                int(payload.get('height') or 0),
+            )
+            if accepted:
+                self.publish('camera_status', self.camera_state.status())
+        elif action == 'refresh_briefing':
+            def run_briefing():
+                self.publish('briefing_status', {'status': 'working'})
+                data = self.orchestrator.tools.daily_briefing_service.generate(force=True)
+                self.publish('daily_briefing', data)
+            self._thread(run_briefing, 'jarvis-briefing-refresh')
+        elif action == 'refresh_weather':
+            def run_weather():
+                try:
+                    data = self.orchestrator.tools.weather_service.get(str(payload.get('location') or '') or None).to_dict()
+                    self.publish('weather', data)
+                except Exception as exc:
+                    self.publish('weather', {'error': str(exc)})
+            self._thread(run_weather, 'jarvis-weather-refresh')
+        elif action == 'refresh_calendar':
+            def run_calendar():
+                try:
+                    tools = self.orchestrator.tools
+                    self.publish('calendar_status', tools.calendar_status_data())
+                    self.publish('calendar_events', tools.list_calendar_events(days=int(payload.get('days') or 3)))
+                except Exception as exc:
+                    self.publish('calendar_status', {'connected': False, 'source': 'none', 'message': str(exc)})
+                    self.publish('calendar_events', [])
+            self._thread(run_calendar, 'jarvis-calendar-refresh')
+        elif action == 'calendar_connect':
+            def connect_calendar():
+                service = self.orchestrator.tools.google_calendar_service
+                try:
+                    message = service.connect()
+                    self.publish('log', message)
+                    self.publish('calendar_status', self.orchestrator.tools.calendar_status_data())
+                    try:
+                        self.publish('calendar_events', self.orchestrator.tools.list_calendar_events(days=3))
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    self.publish('calendar_status', {'connected': False, 'source': 'none', 'message': str(exc)})
+            self._thread(connect_calendar, 'jarvis-calendar-connect')
+        elif action == 'phone_prepare':
+            def prepare_phone():
+                result = self.phone_hub.prepare_private_transport()
+                self.publish('phone_transport', result)
+                self.publish('phone_status', self.phone_hub.status())
+            self._thread(prepare_phone, 'jarvis-phone-transport')
+        elif action == 'phone_pair':
+            pairing = self.phone_hub.begin_pairing()
+            self.publish('phone_pairing', pairing)
+            self.publish('phone_status', self.phone_hub.status())
+        elif action == 'phone_status':
+            self.publish('phone_status', self.phone_hub.status())
+        elif action == 'phone_revoke_all':
+            count = self.phone_hub.revoke_all()
+            self.publish('phone_pairing', {})
+            self.publish('phone_status', self.phone_hub.status())
+            self.publish('log', f'Revoked {count} paired phone(s).')
+        elif action == 'next_f1_lesson':
+            self.publish('f1_lesson', self.orchestrator.tools.f1_learning_service.next_lesson())
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--background", action="store_true")
-    parser.add_argument("--no-open", action="store_true")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument('--background', action='store_true')
+    parser.add_argument('--no-open', action='store_true')
+    parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args(argv)
 
     app = QApplication(sys.argv)
-    app.setApplicationName("JARVIS")
-    app.setOrganizationName("AustinUri")
+    app.setApplicationName('JARVIS')
+    app.setOrganizationName('AustinUri')
     app.setQuitOnLastWindowClosed(False)
 
     base_dir = Path(__file__).resolve().parent.parent
-    config_path = base_dir / "config.json"
+    config_path = base_dir / 'config.json'
     config = AppConfig.load(config_path)
     orchestrator = Orchestrator(base_dir=base_dir, config=config)
+    activity = ActivityTimeline(max_events=400)
 
     state = {
-        "assistantState": "Idle" if orchestrator.enabled else "Disabled",
-        "transcript": "",
-        "response": "",
-        "responseLanguage": "en",
-        "spoken": "",
-        "logs": [],
-        "error": "",
+        'assistantState': 'Idle' if orchestrator.enabled else 'Disabled',
+        'transcript': '', 'response': '', 'responseLanguage': 'en', 'spoken': '',
+        'logs': [], 'activity': [], 'error': '', 'dailyBriefing': orchestrator.tools.daily_briefing_service.cached(),
+        'weather': {}, 'calendarStatus': orchestrator.tools.calendar_status_data(), 'calendarEvents': [],
+        'f1Lesson': {}, 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneTransport': {},
     }
 
     server: WorkspaceServer | None = None
 
     def snapshot() -> dict:
         return {
-            "version": 23,
-            "runtime": dict(state),
-            "config": asdict(config),
-            "aiStatus": state.get("aiStatus", "Checking AI provider…"),
-            "capabilities": [d["function"]["name"] for d in orchestrator.tools.definitions()],
+            'version': 26,
+            'runtime': dict(state),
+            'config': asdict(config),
+            'aiStatus': state.get('aiStatus', 'Checking AI provider…'),
+            'capabilities': [d['function']['name'] for d in orchestrator.tools.definitions()],
+            'dailyBriefing': state.get('dailyBriefing') or {},
+            'weather': state.get('weather') or {},
+            'calendarStatus': state.get('calendarStatus') or {},
+            'calendarEvents': state.get('calendarEvents') or [],
+            'f1Lesson': state.get('f1Lesson') or {},
+            'serviceStatus': state.get('serviceStatus') or {},
+            'phoneStatus': state.get('phoneStatus') or {},
+            'phonePairing': state.get('phonePairing') or {},
+            'phoneTransport': state.get('phoneTransport') or {},
+            'activity': state.get('activity') or [],
         }
 
     def publish(event_type: str, payload) -> None:
+        if event_type == 'daily_briefing': state['dailyBriefing'] = payload
+        elif event_type == 'weather': state['weather'] = payload
+        elif event_type == 'calendar_status': state['calendarStatus'] = payload
+        elif event_type == 'calendar_events': state['calendarEvents'] = payload
+        elif event_type == 'f1_lesson': state['f1Lesson'] = payload
+        elif event_type == 'service_status': state['serviceStatus'] = payload
+        elif event_type == 'phone_status': state['phoneStatus'] = payload
+        elif event_type == 'phone_pairing': state['phonePairing'] = payload
+        elif event_type == 'phone_transport': state['phoneTransport'] = payload
+        elif event_type == 'activity': state['activity'] = activity.snapshot()
         if server is not None:
             server.publish(event_type, payload)
 
+    camera_state = CameraState()
+    orchestrator.tools.set_camera_vision(lambda: camera_state.latest(), orchestrator.agent.analyze_camera_frame)
+
+    phone_hub = CompanionHub(config, log=lambda m: publish('log', m), status_callback=lambda data: publish('phone_status', data))
+    orchestrator.tools.set_phone_hub(phone_hub)
+    state['phoneStatus'] = phone_hub.status()
+    state['calendarStatus'] = orchestrator.tools.calendar_status_data()
+
     bridge = WorkspaceBridge(orchestrator, config, config_path, publish)
-    router = CommandRouter(bridge)
+    router = CommandRouter(bridge, camera_state, publish, orchestrator, phone_hub)
+    profile_store = WorkspaceProfileStore()
+
+    briefing_started = threading.Event()
+    def prepare_arrival_briefing() -> None:
+        if briefing_started.is_set() or not config.briefing_enabled or not config.briefing_on_workspace_open:
+            return
+        briefing_started.set()
+        def worker():
+            try:
+                # Give the managed web service a short chance to come online after login.
+                import time
+                for _ in range(24):
+                    if state.get('serviceStatus', {}).get('searxng') == 'online':
+                        break
+                    time.sleep(0.75)
+                data = orchestrator.tools.daily_briefing_service.generate(force=False)
+                publish('daily_briefing', data)
+                # Lightweight side data keeps widgets useful even if briefing sections are disabled.
+                if isinstance(data.get('weather'), dict): publish('weather', data.get('weather'))
+                if isinstance(data.get('calendar'), dict):
+                    publish('calendar_status', orchestrator.tools.calendar_status_data())
+                    publish('calendar_events', data['calendar'].get('events') or [])
+                if isinstance(data.get('f1_learning'), dict): publish('f1_lesson', data.get('f1_learning'))
+                if config.briefing_announce_voice and config.voice_enabled:
+                    try:
+                        orchestrator.speaker.speak('Good day, sir. Your daily briefing is ready. Which section would you like first?')
+                    except Exception:
+                        pass
+            except Exception as exc:
+                publish('log', f'Daily briefing warning: {exc}')
+        threading.Thread(target=worker, name='jarvis-arrival-briefing', daemon=True).start()
+
+    state['activity'] = activity.snapshot()
 
     server = WorkspaceServer(
-        base_dir=base_dir,
-        config=config,
+        base_dir=base_dir, config=config,
         command_handler=lambda message: router.incoming.emit(message),
         snapshot_provider=snapshot,
+        profile_store=profile_store,
+        on_client_connected=prepare_arrival_briefing,
     )
+    orchestrator.tools.set_ui_event_sink(lambda action, payload: publish('ui_command', {'action': action, 'payload': payload}))
 
-    orchestrator.tools.set_ui_event_sink(lambda action, payload: publish("ui_command", {"action": action, "payload": payload}))
+    def push_activity(event: dict | None) -> None:
+        if not event:
+            return
+        state['activity'] = activity.snapshot()
+        if server is not None:
+            server.publish('activity', event)
 
     def add_log(message: str) -> None:
-        state["logs"].append(message)
-        state["logs"] = state["logs"][-300:]
-        publish("log", message)
+        state['logs'].append(message)
+        state['logs'] = state['logs'][-300:]
+        push_activity(activity.from_log(message))
+        publish('log', message)
 
-    orchestrator.state_changed.connect(lambda value: (state.__setitem__("assistantState", value), publish("state", value)))
-    orchestrator.transcript_ready.connect(lambda text, lang: (state.__setitem__("transcript", text), publish("transcript", {"text": text, "language": lang})))
-    orchestrator.response_ready.connect(lambda text, lang: (state.__setitem__("response", text), state.__setitem__("responseLanguage", lang), publish("response", {"text": text, "language": lang})))
-    orchestrator.spoken_text_ready.connect(lambda text: (state.__setitem__("spoken", text), publish("spoken", text)))
+    def on_state(value: str) -> None:
+        state['assistantState'] = value
+        publish('state', value)
+        push_activity(activity.state(value))
+
+    def on_transcript(text: str, lang: str) -> None:
+        state['transcript'] = text
+        publish('transcript', {'text': text, 'language': lang})
+        push_activity(activity.input(text, source='voice-or-text'))
+
+    def on_response(text: str, lang: str) -> None:
+        state['response'] = text
+        state['responseLanguage'] = lang
+        publish('response', {'text': text, 'language': lang})
+        push_activity(activity.output(text))
+
+    def on_error(text: str) -> None:
+        state['error'] = text
+        publish('error', text)
+        push_activity(activity.add('error', 'JARVIS error', text, status='error', source='runtime'))
+
+    orchestrator.state_changed.connect(on_state)
+    orchestrator.transcript_ready.connect(on_transcript)
+    orchestrator.response_ready.connect(on_response)
+    orchestrator.spoken_text_ready.connect(lambda text: (state.__setitem__('spoken', text), publish('spoken', text)))
     orchestrator.log_ready.connect(add_log)
-    orchestrator.error_raised.connect(lambda text: (state.__setitem__("error", text), publish("error", text)))
+    orchestrator.error_raised.connect(on_error)
+    phone_hub.log = add_log
+    orchestrator.tools.daily_briefing_service.log = add_log
+    push_activity(activity.add('system', 'JARVIS Core started', 'Background runtime and Control Center bridge initialized.', status='success', source='runtime'))
 
-    host = "127.0.0.1"
-    url = f"http://{host}:{args.port}"
-    uvicorn_config = uvicorn.Config(server.app, host=host, port=args.port, log_level="warning")
+    host = '127.0.0.1'
+    url = f'http://{host}:{args.port}'
+    uvicorn_config = uvicorn.Config(server.app, host=host, port=args.port, log_level='warning')
     uvicorn_server = uvicorn.Server(uvicorn_config)
-    server_thread = threading.Thread(target=uvicorn_server.run, name="jarvis-workspace-server", daemon=True)
+    server_thread = threading.Thread(target=uvicorn_server.run, name='jarvis-workspace-server', daemon=True)
     server_thread.start()
 
+    # The companion API never binds to LAN/WAN interfaces. Tailscale Serve may
+    # proxy this localhost port over tailnet-only HTTPS after explicit setup.
+    phone_server = PhoneBridgeServer(phone_hub)
+    phone_uvicorn_config = uvicorn.Config(phone_server.app, host='127.0.0.1', port=int(getattr(config, 'phone_bridge_port', 8766)), log_level='warning')
+    phone_uvicorn_server = uvicorn.Server(phone_uvicorn_config)
+    phone_thread = threading.Thread(target=phone_uvicorn_server.run, name='jarvis-phone-bridge', daemon=True)
+    phone_thread.start()
+
+    service_manager = ServiceManager(config, log=add_log, status_callback=lambda data: publish('service_status', data))
+    service_manager.start()
+
     def quit_all() -> None:
+        service_manager.stop()
         orchestrator.shutdown()
         config.save(config_path)
         uvicorn_server.should_exit = True
+        phone_uvicorn_server.should_exit = True
         app.quit()
 
     app.aboutToQuit.connect(orchestrator.shutdown)
-    tray = WorkspaceTray(app, orchestrator, url, quit_all)
+    tray = WorkspaceTray(app, orchestrator, url, quit_all, service_manager=service_manager)
 
     def check_ai_status() -> None:
         status = orchestrator.ai_provider_status()
-        state["aiStatus"] = status
-        publish("ai_status", status)
-
-    threading.Thread(target=check_ai_status, name="jarvis-ai-status", daemon=True).start()
+        state['aiStatus'] = status
+        publish('ai_status', status)
+    threading.Thread(target=check_ai_status, name='jarvis-ai-status', daemon=True).start()
 
     if not args.background and not args.no_open:
         QTimer.singleShot(900, tray.open_workspace)
 
     exit_code = app.exec()
+    service_manager.stop()
     config.save(config_path)
     uvicorn_server.should_exit = True
+    phone_uvicorn_server.should_exit = True
     return exit_code
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())

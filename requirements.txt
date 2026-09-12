@@ -8,5 +8,10 @@ psutil>=5.9
 trafilatura>=2.0.0
 fastapi>=0.116
 uvicorn[standard]>=0.35
+cryptography>=45.0
+keyring>=25.0
+google-api-python-client>=2.170
+google-auth-httplib2>=0.2
+google-auth-oauthlib>=1.2
 # Optional local voice engine:
 # piper-tts

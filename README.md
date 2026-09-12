@@ -1,25 +1,11 @@
-# JARVIS v23 — Workspace System
+# JARVIS v26
 
-v23 replaces the fixed desktop window with a modular local workspace while keeping the Python JARVIS core.
+**Free Secure Mobile Foundation + Ordered Agent Activity**
 
-## What changed
+JARVIS remains a local-first Windows assistant: local Qwen via LM Studio, local SearXNG web research, Open-Meteo weather, camera/vision, persistent custom workspaces, background runtime, daily intelligence and controlled tools.
 
-- Draggable and resizable widgets
-- Hide/show widgets at runtime
-- Pop widgets into separate windows
-- Fullscreen any widget
-- Multiple saved workspaces: Normal, Research, Developer, Vision, Minimal
-- Local layout persistence in the browser profile
-- Command palette (`Ctrl+K`)
-- Theme switching (Amber / FRIDAY / Mono)
-- Animated state-reactive JARVIS core
-- Conversation, sources, activity, system monitor, context, camera, and settings widgets
-- Explicit browser camera permission; camera is off by default
-- Python core and UI communicate over a local WebSocket
-- JARVIS can control its own interface through safe `ui_*` agent tools
-- Old PySide GUI retained as `--legacy`
-- Workspace runtime stays alive in the Windows system tray
+v26 adds a conservative Android companion foundation for the phone's native/system calendar, while keeping Google Calendar as an optional backup. It also rebuilds Agent Activity into an ordered execution timeline so you can see exactly what JARVIS did and in what order.
 
-The UI is a client. Wake word, STT, TTS, AI, tools, memory, and web research remain in Python.
+No paid AI API is required for v26.
 
-See `START_HERE.md`.
+Read `START_HERE.md` before first run and `CHANGELOG_v26.md` for the security model and exact changes.

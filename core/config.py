@@ -7,6 +7,8 @@ from pathlib import Path
 
 @dataclass
 class AppConfig:
+    config_version: int = 26
+
     # AI / agent provider
     ai_provider: str = "LM Studio"
     ai_base_url: str = "http://127.0.0.1:1234/v1"
@@ -33,15 +35,58 @@ class AppConfig:
     wake_word_threshold: float = 0.15
     wake_vad_threshold: float = 0.18
     silence_threshold: float = 0.009
-    command_max_seconds: float = 9.0
-    command_silence_seconds: float = 1.4
-    command_min_seconds: float = 1.8
+    command_max_seconds: float = 14.0
+    command_silence_seconds: float = 2.2
+    command_min_seconds: float = 1.6
     command_preroll_seconds: float = 0.45
     accent_assist_enabled: bool = True
     tavily_api_key: str = ""
     searxng_base_url: str = "http://localhost:8888"
-    web_max_results: int = 5
-    web_timeout_seconds: float = 12.0
+    web_max_results: int = 10
+    web_timeout_seconds: float = 18.0
+    web_research_depth: str = "deep"
+    camera_vision_enabled: bool = True
+    camera_frame_interval_seconds: float = 1.5
+
+    # v25 managed runtime / services
+    auto_manage_services: bool = True
+    auto_start_lm_studio: bool = True
+    auto_load_ai_model: bool = True
+    ai_local_model_key: str = "qwen/qwen3.5-9b"
+    ai_context_length: int = 16384
+    auto_start_docker_desktop: bool = True
+    auto_start_searxng: bool = True
+    service_health_interval_seconds: float = 45.0
+
+    # Daily intelligence
+    briefing_enabled: bool = True
+    briefing_on_workspace_open: bool = True
+    briefing_announce_voice: bool = True
+    briefing_include_israel: bool = True
+    briefing_include_idf: bool = True
+    briefing_include_champions_league: bool = True
+    briefing_include_f1: bool = True
+    briefing_include_f1_learning: bool = True
+    briefing_include_ai: bool = True
+    briefing_include_football: bool = True
+    briefing_include_world: bool = True
+    briefing_include_weather: bool = True
+    briefing_include_calendar: bool = True
+    weather_location: str = "Netanya, Israel"
+
+    # Google Calendar OAuth desktop client JSON. Leave blank to use %APPDATA%\Jarvis\credentials\google_calendar_client.json
+    google_calendar_client_secret_path: str = ""
+
+
+    # v26 secure phone companion foundation. The phone bridge itself listens only
+    # on localhost; remote access is expected to be provided by Tailscale Serve.
+    phone_bridge_enabled: bool = True
+    phone_bridge_port: int = 8766
+    phone_poll_timeout_seconds: float = 22.0
+    phone_command_timeout_seconds: float = 30.0
+    phone_pairing_minutes: int = 5
+    prefer_phone_calendar: bool = True
+    google_calendar_fallback_enabled: bool = True
 
     # Personality / behavior
     tone_mode: str = "Respectful"
@@ -52,7 +97,7 @@ class AppConfig:
 
     # Background runtime
     minimize_to_tray_on_close: bool = True
-    start_with_windows: bool = False
+    start_with_windows: bool = True
     start_minimized: bool = False
     keep_assistant_running_in_tray: bool = True
 
@@ -82,7 +127,32 @@ class AppConfig:
         if "ai_provider" not in data:
             data["ai_provider"] = "LM Studio"
 
+        old_version = int(data.get("config_version") or 0)
         cfg = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if old_version < 24:
+            # v24 recorder/research migration. Preserve deliberate custom values,
+            # but upgrade old defaults that caused clipped endings and shallow web answers.
+            if float(data.get("command_silence_seconds", 1.4)) <= 1.45:
+                cfg.command_silence_seconds = 2.2
+            if float(data.get("command_max_seconds", 9.0)) <= 9.1:
+                cfg.command_max_seconds = 14.0
+            if int(data.get("web_max_results", 5)) <= 5:
+                cfg.web_max_results = 10
+            if float(data.get("web_timeout_seconds", 12.0)) <= 12.1:
+                cfg.web_timeout_seconds = 18.0
+            cfg.config_version = 24
+        if old_version < 25:
+            cfg.config_version = 25
+            # v25 makes the runtime app-like: services are managed in the background
+            # and start-with-Windows is enabled by default for fresh/older configs.
+            if "start_with_windows" not in data:
+                cfg.start_with_windows = True
+        if old_version < 26:
+            cfg.config_version = 26
+            # v26 defaults weather to Netanya and makes native phone calendar the
+            # preferred source when a companion is connected.
+            if not str(data.get("weather_location") or "").strip():
+                cfg.weather_location = "Netanya, Israel"
         if not str(cfg.searxng_base_url).strip():
             cfg.searxng_base_url = "http://localhost:8888"
         if not str(cfg.ai_base_url).strip():

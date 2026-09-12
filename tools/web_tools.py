@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.parse
 import urllib.request
 import webbrowser
 from dataclasses import dataclass
 from html import unescape
+from html.parser import HTMLParser
 from typing import Any
 
 from core.config import AppConfig
@@ -42,6 +44,8 @@ HE_STOPWORDS = {
 }
 PREFERRED_FACT_DOMAINS = (
     "wikipedia.org",
+    "uefa.com",
+    "fifa.com",
     "nasa.gov",
     "science.nasa.gov",
     "britannica.com",
@@ -68,10 +72,104 @@ DIRTY_PATTERNS = [
         r"<link\s",
         r"<svg",
         r"<stop\s+offset",
-        r"cookie",
-        r"consent",
     ]
 ]
+
+
+class _StructuredHTMLTextParser(HTMLParser):
+    """Small dependency-free extractor that preserves table/list rows.
+
+    Trafilatura is excellent for prose but can flatten dense sports/history
+    tables into one very long line.  This parser gives deep research a second
+    structured channel without turning raw HTML into model context.
+    """
+
+    SKIP = {"script", "style", "noscript", "svg", "template"}
+    BLOCK = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.skip_depth = 0
+        self.in_row = False
+        self.in_cell = False
+        self.row_cells: list[str] = []
+        self.cell_parts: list[str] = []
+        self.block_tag: str | None = None
+        self.block_parts: list[str] = []
+        self.lines: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        if tag in self.SKIP:
+            self.skip_depth += 1
+            return
+        if self.skip_depth:
+            return
+        if tag == "tr":
+            self.in_row = True
+            self.row_cells = []
+        elif tag in {"td", "th"} and self.in_row:
+            self.in_cell = True
+            self.cell_parts = []
+        elif tag in self.BLOCK and self.block_tag is None:
+            self.block_tag = tag
+            self.block_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self.SKIP:
+            if self.skip_depth:
+                self.skip_depth -= 1
+            return
+        if self.skip_depth:
+            return
+        if tag in {"td", "th"} and self.in_cell:
+            cell = _collapse_whitespace(" ".join(self.cell_parts))
+            if cell:
+                self.row_cells.append(cell)
+            self.in_cell = False
+            self.cell_parts = []
+        elif tag == "tr" and self.in_row:
+            if len(self.row_cells) >= 2:
+                self.lines.append(" | ".join(self.row_cells))
+            self.in_row = False
+            self.row_cells = []
+        elif self.block_tag == tag:
+            block = _collapse_whitespace(" ".join(self.block_parts))
+            if block and len(block) >= 20:
+                self.lines.append(block)
+            self.block_tag = None
+            self.block_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        text = data.strip()
+        if not text:
+            return
+        if self.in_cell:
+            self.cell_parts.append(text)
+        if self.block_tag is not None:
+            self.block_parts.append(text)
+
+
+def _extract_structured_html_text(html: str) -> str:
+    parser = _StructuredHTMLTextParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return ""
+    # De-duplicate while preserving document order.
+    seen: set[str] = set()
+    lines: list[str] = []
+    for line in parser.lines:
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 @dataclass(slots=True)
@@ -115,6 +213,53 @@ def search_web(query: str) -> str:
     return f"Opened a web search for '{cleaned}'."
 
 
+def search_web_evidence(query: str, config: AppConfig, limit: int = 8) -> list[dict[str, Any]]:
+    """Return ranked SearXNG evidence without requiring page extraction.
+
+    Daily briefing uses this deliberately: modern news pages often block automated
+    article fetching, but their search result titles/snippets are still useful for
+    discovery.  The model then summarizes only the evidence we actually retrieved.
+    """
+    cleaned = _normalize_query(query)
+    base = str(getattr(config, "searxng_base_url", "") or "").strip().rstrip("/")
+    if not cleaned or not base:
+        return []
+    params = {
+        "q": cleaned,
+        "format": "json",
+        "categories": "general",
+        "language": "he" if _looks_hebrew(cleaned) else "en",
+        "safesearch": "1",
+    }
+    try:
+        data = _get_json(f"{base}/search?{urllib.parse.urlencode(params)}", timeout=float(getattr(config, "web_timeout_seconds", 18.0)))
+    except Exception:
+        return []
+    results = data.get("results") if isinstance(data, dict) else []
+    if not isinstance(results, list):
+        return []
+    ranked = _rank_results(cleaned, results)
+    out: list[dict[str, Any]] = []
+    for item in ranked[: max(1, min(20, int(limit)))]:
+        title = _clean_text(str(item.get("title") or ""))
+        url = str(item.get("url") or "").strip()
+        snippet = _clean_text(str(item.get("content") or item.get("snippet") or ""))
+        if not title or not url:
+            continue
+        # A weak/empty snippet is still allowed when the title is informative.
+        if snippet and _is_dirty_text(snippet):
+            snippet = ""
+        out.append({
+            "title": title[:220],
+            "url": url,
+            "snippet": snippet[:650],
+            "published": item.get("publishedDate") or item.get("published_date") or "",
+            "engine": item.get("engine") or "",
+            "score": item.get("score") or 0,
+        })
+    return out
+
+
 def answer_web_question(query: str, config: AppConfig) -> WebAnswer:
     cleaned = _normalize_query(query)
     if not cleaned:
@@ -146,11 +291,8 @@ def answer_web_question(query: str, config: AppConfig) -> WebAnswer:
         return answer
 
     return WebAnswer(
-        answer=(
-            "Web lookup could not get a reliable result. Set a working SearXNG instance URL in Settings, "
-            "or ask a more specific fact question."
-        ),
-        spoken_text="I could not get a reliable web result.",
+        answer="I could not verify enough reliable current information for that request yet.",
+        spoken_text="I could not verify enough reliable information yet.",
         source_lines=[],
         provider="none",
         query=cleaned,
@@ -162,38 +304,195 @@ def _answer_with_searxng(query: str, config: AppConfig) -> WebAnswer | None:
     if not base:
         return None
 
-    params = {
-        "q": query,
-        "format": "json",
-        "categories": "general",
-        "language": "he" if _looks_hebrew(query) else "en",
-        "safesearch": "1",
-    }
-    url = f"{base}/search?{urllib.parse.urlencode(params)}"
-    try:
-        data = _get_json(url, timeout=config.web_timeout_seconds)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
+    deep = _is_deep_research_query(query)
+    variants = _research_query_variants(query) if deep else [query]
+    collected: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+
+    for variant in variants:
+        params = {
+            "q": variant,
+            "format": "json",
+            "categories": "general",
+            "language": "he" if _looks_hebrew(query) else "en",
+            "safesearch": "1",
+        }
+        url = f"{base}/search?{urllib.parse.urlencode(params)}"
+        try:
+            data = _get_json(url, timeout=config.web_timeout_seconds)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        results = data.get("results") or []
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            item_url = str(item.get("url") or "").strip()
+            if not item_url or item_url in seen_urls:
+                continue
+            seen_urls.add(item_url)
+            collected.append(item)
+
+    if not collected:
         return None
 
-    results = data.get("results") or []
-    if not isinstance(results, list) or not results:
-        return None
-
-    ranked_results = _rank_results(query, results)
+    ranked_results = _rank_results(query, collected)
     if not ranked_results:
         return None
 
-    answer = _synthesize_from_pages(query, ranked_results, timeout=config.web_timeout_seconds)
-    if not answer:
-        answer = _synthesize_from_results(query, ranked_results)
+    if deep:
+        answer = _build_research_evidence(
+            query,
+            ranked_results[: max(6, min(12, int(config.web_max_results)))],
+            timeout=config.web_timeout_seconds,
+        )
+    else:
+        answer = _synthesize_from_pages(query, ranked_results, timeout=config.web_timeout_seconds)
+        if not answer:
+            answer = _synthesize_from_results(query, ranked_results)
+
     if not answer:
         return None
 
-    source_lines = _format_sources(ranked_results)
+    source_lines = _format_sources(ranked_results, limit=6 if deep else 3)
     spoken = _short_spoken_answer(answer)
-    return WebAnswer(answer=answer, spoken_text=spoken, source_lines=source_lines, provider="searxng", query=query)
+    return WebAnswer(answer=answer, spoken_text=spoken, source_lines=source_lines, provider="searxng-deep" if deep else "searxng", query=query)
+
+def _is_deep_research_query(query: str) -> bool:
+    lowered = query.lower()
+    if re.search(r"\b(all|every|each|list|history|historical|from|since|back to|between|complete|full|finals|seasons|winners|results)\b", lowered):
+        return True
+    if re.search(r"(?:כל|רשימה|היסטוריה|מאז|משנת|עד שנת|גמרים|עונות|זוכים|תוצאות)", query):
+        return True
+    # A year range / historical cutoff is almost always a collection request.
+    years = re.findall(r"\b(?:19|20)\d{2}\b", query)
+    return len(years) >= 1 and bool(re.search(r"\b(from|since|back|until|to)\b", lowered))
+
+
+def _research_query_variants(query: str) -> list[str]:
+    variants = [query]
+    lowered = query.lower()
+    # One broad query and one authority-biased query improve coverage without
+    # depending on a paid search API.
+    variants.append(f"{query} official history results")
+    if re.search(r"champions league|european cup", lowered) and re.search(r"final", lowered):
+        variants.extend([
+            "UEFA Champions League European Cup finals winners runners-up scores history",
+            "site:uefa.com Champions League history finals results 1990/91 1991/92",
+            '"List of European Cup and UEFA Champions League finals"',
+        ])
+    elif re.search(r"\b(finals|championship|tournament|season)\b", lowered):
+        variants.append(f"{query} winners runners-up scores")
+    else:
+        variants.append(f"{query} authoritative source complete list")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in variants:
+        key = _collapse_whitespace(item).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(_collapse_whitespace(item))
+    return deduped[:5]
+
+
+def _build_research_evidence(query: str, results: list[dict[str, Any]], timeout: float) -> str:
+    """Return a compact multi-source evidence pack for the agent to synthesize.
+
+    Historical list requests need enough source material for a complete answer,
+    but fetching eight pages serially makes a voice assistant feel broken.  Fetch
+    candidate pages concurrently, then assemble evidence in ranked-result order.
+    """
+    sections: list[str] = []
+    total_chars = 0
+    max_total = 14_000
+    query_tokens = _query_tokens(query)
+    candidates = [item for item in results[:8] if str(item.get("url") or "").strip()]
+
+    fetched: dict[str, str] = {}
+    if candidates:
+        with ThreadPoolExecutor(max_workers=min(6, len(candidates))) as pool:
+            jobs = {pool.submit(_extract_page_text, str(item.get("url") or "").strip(), timeout): str(item.get("url") or "").strip() for item in candidates}
+            for future in as_completed(jobs):
+                url = jobs[future]
+                try:
+                    fetched[url] = future.result() or ""
+                except Exception:
+                    fetched[url] = ""
+
+    for item in candidates:
+        url = str(item.get("url") or "").strip()
+        title = _clean_text(str(item.get("title") or url or "Source"))
+        snippet = _clean_text(str(item.get("content") or item.get("snippet") or ""))
+        source_text = fetched.get(url) or snippet
+        if not source_text or _is_dirty_text(source_text):
+            continue
+
+        excerpt = _research_excerpt(source_text, query_tokens, limit=3200)
+        if not excerpt:
+            continue
+        section = f"SOURCE: {title}\nURL: {url}\nEVIDENCE:\n{excerpt}"
+        room = max_total - total_chars
+        if room <= 300:
+            break
+        section = section[:room]
+        sections.append(section)
+        total_chars += len(section)
+
+    if not sections:
+        return ""
+    return (
+        "Multi-source research evidence follows. Use it to answer the user's full request; "
+        "for lists/ranges, preserve every supported item and do not collapse the answer to two sentences. "
+        "Cross-check conflicting rows between sources and explicitly flag gaps rather than inventing them.\n\n"
+        + "\n\n---\n\n".join(sections)
+    )
+
+def _research_excerpt(text: str, query_tokens: list[str], limit: int = 2600) -> str:
+    cleaned = unescape(text or "").replace("\x00", " ")
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    if not cleaned:
+        return ""
+
+    # Keep year-heavy/table-like material for historical list queries.
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    scored: list[tuple[float, str]] = []
+    for line in lines:
+        lower = line.lower()
+        score = sum(2.0 for tok in query_tokens if tok in lower)
+        if re.search(r"\b(?:19|20)\d{2}(?:/\d{2})?\b", line):
+            score += 3.0
+        if re.search(r"\b(final|winner|runner|score|pen|champion)\b", lower):
+            score += 2.0
+        if 15 <= len(line) <= 700:
+            scored.append((score, line))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    selected: list[str] = []
+    used: set[str] = set()
+    chars = 0
+    for score, line in scored:
+        if score <= 0 and selected:
+            continue
+        key = line.lower()
+        if key in used:
+            continue
+        if chars + len(line) + 1 > limit:
+            continue
+        used.add(key)
+        selected.append(line)
+        chars += len(line) + 1
+        if chars >= limit * 0.85:
+            break
+
+    if selected:
+        return "\n".join(selected)[:limit]
+    return _collapse_whitespace(cleaned)[:limit]
 
 
 def _answer_with_tavily(query: str, config: AppConfig) -> WebAnswer | None:
@@ -294,7 +593,7 @@ def _rank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str, A
             score += 10
         ranked.append((score, item))
     ranked.sort(key=lambda pair: pair[0], reverse=True)
-    return [item for _, item in ranked[:8]]
+    return [item for _, item in ranked[:12]]
 
 
 def _domain_preference_score(url: str) -> float:
@@ -373,27 +672,35 @@ def _extract_page_text(url: str, timeout: float) -> str:
     except Exception:
         return ""
 
-    if _is_dirty_text(html):
-        return ""
-
+    # Do not reject the raw HTML merely because it contains script/style tags.
+    # Modern sites almost always do; extraction is supposed to remove that noise.
+    structured = _clean_page_text(_extract_structured_html_text(html))
+    prose = ""
     if trafilatura is not None:
         try:
-            extracted = trafilatura.extract(
+            prose = trafilatura.extract(
                 html,
                 include_comments=False,
-                include_tables=False,
-                favor_precision=True,
+                include_tables=True,
+                favor_recall=True,
+                output_format="markdown",
                 url=url,
-            )
-            extracted = _clean_text(extracted or "")
-            if extracted and not _is_dirty_text(extracted):
-                return extracted
+            ) or ""
+            prose = _clean_page_text(prose)
         except Exception:
-            pass
+            prose = ""
+
+    combined_parts = []
+    if structured and not _is_dirty_text(structured):
+        combined_parts.append(structured)
+    if prose and not _is_dirty_text(prose):
+        combined_parts.append(prose)
+    if combined_parts:
+        return _clean_page_text("\n".join(combined_parts))
 
     fallback = re.sub(r"<script.*?</script>|<style.*?</style>|<noscript.*?</noscript>", " ", html, flags=re.IGNORECASE | re.DOTALL)
     fallback = re.sub(r"<[^>]+>", " ", fallback)
-    fallback = _clean_text(fallback)
+    fallback = _clean_page_text(fallback)
     if _is_dirty_text(fallback):
         return ""
     return fallback
@@ -544,9 +851,9 @@ def _normalize_query(text: str) -> str:
     return _collapse_whitespace(cleaned)
 
 
-def _format_sources(results: list[dict[str, Any]]) -> list[str]:
+def _format_sources(results: list[dict[str, Any]], limit: int = 3) -> list[str]:
     lines: list[str] = []
-    for idx, item in enumerate(results[:3], start=1):
+    for idx, item in enumerate(results[: max(1, int(limit))], start=1):
         title = _clean_text(str(item.get("title") or item.get("url") or "Source"))
         url = str(item.get("url") or "").strip()
         if not url:
@@ -582,6 +889,28 @@ def _short_spoken_answer(text: str, hard_limit: int = 220) -> str:
     return chosen
 
 
+def _clean_page_text(text: str) -> str:
+    """Clean extracted document text while preserving useful row/line structure.
+
+    Historical tables and season-by-season lists are much easier for the agent
+    to use when years/results remain on separate lines.
+    """
+    cleaned = unescape(text or "").replace("\x00", " ")
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in cleaned.split("\n")]
+    out: list[str] = []
+    blank = False
+    for line in lines:
+        if not line:
+            if out and not blank:
+                out.append("")
+            blank = True
+            continue
+        out.append(line)
+        blank = False
+    return "\n".join(out).strip()
+
+
 def _clean_text(text: str) -> str:
     cleaned = unescape(text or "")
     cleaned = re.sub(r"\s+", " ", cleaned)
@@ -606,6 +935,8 @@ def _looks_like_who_question(query: str) -> bool:
 
 
 def _should_try_wikipedia_first(query: str) -> bool:
+    if _is_deep_research_query(query):
+        return False
     lowered = query.lower()
     if any(token in lowered for token in ["latest", "current", "today", "news", "price", "weather", "stock", "score", "president", "prime minister"]):
         return False

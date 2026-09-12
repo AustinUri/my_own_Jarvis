@@ -23,6 +23,9 @@ export interface ConfigState {
   verbosity_mode?: string
   searxng_base_url?: string
   conversation_mode_enabled?: boolean
+  camera_vision_enabled?: boolean
+  camera_frame_interval_seconds?: number
+  web_research_depth?: string
   [key: string]: unknown
 }
 
@@ -38,4 +41,18 @@ export interface Metrics {
   cpu: number
   ram: number
   battery: number | null
+}
+
+export interface UiCommand {
+  action: string
+  payload: Record<string, unknown>
+  nonce: number
+}
+
+export interface CameraStatus {
+  enabled: boolean
+  hasFrame: boolean
+  capturedAt?: number | null
+  width?: number
+  height?: number
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ConfigState, Metrics, Snapshot } from './types'
+import type { CameraStatus, ConfigState, Metrics, Snapshot, UiCommand } from './types'
 
 const emptySnapshot: Snapshot = {
-  version: 23,
+  version: 24,
   runtime: { assistantState: 'Idle', transcript: '', response: '', responseLanguage: 'en', spoken: '', logs: [], error: '' },
   config: {}, aiStatus: 'Connecting…', capabilities: [],
 }
@@ -11,6 +11,8 @@ export function useJarvisSocket() {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot)
   const [metrics, setMetrics] = useState<Metrics>({ cpu: 0, ram: 0, battery: null })
   const [connected, setConnected] = useState(false)
+  const [uiCommand, setUiCommand] = useState<UiCommand | null>(null)
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>({ enabled: false, hasFrame: false })
   const socket = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -39,6 +41,9 @@ export function useJarvisSocket() {
           else if (type === 'error') setSnapshot(s => ({ ...s, runtime: { ...s.runtime, error: String(payload || '') } }))
           else if (type === 'config') setSnapshot(s => ({ ...s, config: payload }))
           else if (type === 'system_metrics') setMetrics(payload)
+          else if (type === 'ui_command') setUiCommand({ action: String(payload?.action || ''), payload: payload?.payload || {}, nonce: Date.now() })
+          else if (type === 'camera_status') setCameraStatus(payload || { enabled: false, hasFrame: false })
+          else if (type === 'ai_status') setSnapshot(s => ({ ...s, aiStatus: String(payload || '') }))
         } catch { /* ignore malformed events */ }
       }
     }
@@ -57,5 +62,5 @@ export function useJarvisSocket() {
   }, [])
 
   const patchConfig = useCallback((patch: ConfigState) => send('config_patch', patch), [send])
-  return { snapshot, metrics, connected, send, patchConfig }
+  return { snapshot, metrics, connected, uiCommand, cameraStatus, send, patchConfig }
 }

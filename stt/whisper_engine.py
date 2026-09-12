@@ -188,7 +188,7 @@ class WhisperEngine:
         kwargs = {
             'beam_size': 5 if self.accent_assist_enabled else 3,
             'vad_filter': True,
-            'vad_parameters': {'min_silence_duration_ms': 450, 'speech_pad_ms': 250},
+            'vad_parameters': {'min_silence_duration_ms': 700, 'speech_pad_ms': 350},
             'condition_on_previous_text': False,
             'temperature': 0.0,
         }
@@ -341,14 +341,18 @@ class WhisperEngine:
     def _build_initial_prompt(self, command_mode: bool) -> str | None:
         if not self.accent_assist_enabled:
             return None
+        # v24: the microphone is a conversational interface, not a command-only
+        # dictation box.  The old command-heavy prompt biased Whisper toward app
+        # names and could drop/warp proper nouns, scores and trailing years.
         english = (
-            'Jarvis desktop commands. Say: open chrome, open spotify, open discord, open edge, open youtube, '
-            'open google, open gmail, open github, open chatgpt, open downloads, open desktop, open documents, '
-            'what time is it, what is the date, system status, calculate, search files, search google, create note, lock computer.'
+            "Natural conversation with JARVIS, a desktop AI assistant. Transcribe faithfully and do not shorten the sentence. "
+            "Preserve proper nouns, website domains, dates, scores and spoken numbers/years such as 1991, 2005, 2024. "
+            "The user may ask research questions or actions such as open chess.com, Chrome, YouTube, ChatGPT, or search the web."
         )
         hebrew = (
-            'פקודות ג׳רוויס. פתח כרום, פתח ספוטיפיי, פתח יוטיוב, פתח גוגל, פתח גימייל, פתח הורדות, פתח מסמכים, '
-            'מה השעה, מה התאריך, מצב המחשב, חפש קבצים, חפש בגוגל, כתוב הערה, נעל את המחשב.'
+            "שיחה טבעית עם ג׳רוויס, עוזר AI למחשב. תמלל את כל המשפט בנאמנות ואל תקצר אותו. "
+            "שמור שמות, אתרי אינטרנט, תאריכים, תוצאות ומספרים או שנים כגון 1991, 2005, 2024. "
+            "המשתמש יכול לשאול שאלות מחקר או לבקש פעולות במחשב."
         )
         if self.language_mode == 'English':
             return english
@@ -369,12 +373,28 @@ class WhisperEngine:
             pattern = re.compile(rf'(?<!\w){re.escape(source)}(?!\w)', re.IGNORECASE)
             lowered = pattern.sub(target, lowered)
 
-        if command_mode and not re.search(r'[֐-׿]', lowered):
-            lowered = self._fuzzy_repair_english_command(lowered)
-        if command_mode and re.search(r'[֐-׿]', lowered):
-            lowered = self._repair_hebrew_command(lowered)
+        # Only fuzzy-repair short explicit action commands.  General research
+        # speech must remain intact; v23 could accidentally coerce normal words
+        # toward the small desktop-command vocabulary.
+        if command_mode and self._looks_like_action_command(lowered):
+            if not re.search(r'[֐-׿]', lowered):
+                lowered = self._fuzzy_repair_english_command(lowered)
+            else:
+                lowered = self._repair_hebrew_command(lowered)
 
         return self._normalize_whitespace(lowered)
+
+    @staticmethod
+    def _looks_like_action_command(text: str) -> bool:
+        cleaned = text.strip().lower()
+        if not cleaned:
+            return False
+        english = (
+            'open ', 'close ', 'launch ', 'run ', 'start ', 'stop ', 'search ',
+            'go to ', 'navigate ', 'show me ', 'bring up ', 'lock ', 'create note',
+        )
+        hebrew = ('פתח ', 'סגור ', 'הפעל ', 'חפש ', 'תראה ', 'הצג ', 'נעל ', 'כתוב הערה')
+        return cleaned.startswith(english + hebrew)
 
     def _repair_hebrew_command(self, text: str) -> str:
         replacements = {
@@ -408,7 +428,7 @@ class WhisperEngine:
                 repaired_tokens.append(lowered)
                 continue
             best = self._best_match(lowered, self.COMMAND_VOCABULARY)
-            if best and self._similarity(lowered, best) >= 0.74:
+            if best and self._similarity(lowered, best) >= 0.84:
                 repaired_tokens.append(best)
             else:
                 repaired_tokens.append(lowered)
