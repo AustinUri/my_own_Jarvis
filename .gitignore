@@ -1,9 +1,12 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
 *.pyd
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -17,25 +20,22 @@ venv/
 env/
 ENV/
 
-# IDE / editor
+# =========================
+# IDE / OS
+# =========================
 .vscode/
 .idea/
 *.code-workspace
 
-# OS files
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Build / packaging
-build/
-dist/
-*.egg-info/
-.eggs/
-pip-wheel-metadata/
-
-# Logs / temp / runtime
+# =========================
+# Runtime / logs / temp
+# =========================
 logs/
+log/
 *.log
 *.tmp
 *.temp
@@ -43,32 +43,79 @@ logs/
 *.mp3
 *.pcm
 
-# Local notes / generated content
 notes/
 outputs/
 
-# Large local third-party binaries and models
+# =========================
+# Python/build output
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================
+# JARVIS models / binaries
+# =========================
 third_party/
 !third_party/.gitkeep
 
-# If you want to keep the folder structure but not the heavy files,
-# uncomment these instead of ignoring the whole folder:
-# third_party/whisper.cpp/*
-# !third_party/whisper.cpp/models/
-# !third_party/whisper.cpp/.gitkeep
-# !third_party/whisper.cpp/models/.gitkeep
+models/
+model/
+downloads/
 
-# Local config / secrets (uncomment if you add them later)
-# .env
-# .env.*
-# config.local.json
-# secrets.json
+*.gguf
+*.onnx
+*.bin
 
-# Local runtime config (contains API keys)
+# =========================
+# Secrets / machine-local config
+# =========================
+.env
+.env.*
 config.json
+config.local.json
+secrets.json
+credentials.json
+client_secret*.json
+token*.json
+*.pem
+*.key
+*.p12
+*.pfx
 
-# JARVIS v26 workspace frontend
+# =========================
+# Workspace UI
+# =========================
 workspace_ui/node_modules/
-# The zero-build runtime bundle is intentionally versioned.
+
+# Keep the prebuilt runtime UI
 !workspace_ui/dist/
 !workspace_ui/dist/**
+
+# =========================
+# Android
+# =========================
+android_companion/.gradle/
+android_companion/local.properties
+android_companion/app/build/
+android_companion/build/
+
+*.apk
+*.aab
+*.apks
+
+# Signing keys - NEVER commit these
+*.jks
+*.keystore
+
+# Android Studio
+android_companion/.idea/
+android_companion/*.iml
+
+# =========================
+# Misc generated caches
+# =========================
+.gradle/
+.cache/
