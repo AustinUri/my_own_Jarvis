@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass
 class AppConfig:
-    config_version: int = 26
+    config_version: int = 281
 
     # AI / agent provider
     ai_provider: str = "LM Studio"
@@ -19,7 +19,7 @@ class AppConfig:
     ai_temperature: float = 0.35
     conversation_history_turns: int = 12
 
-    language_mode: str = "Auto"
+    language_mode: str = "English"
     mic_name: str = "Default"
     speaker_name: str = "Default"
     voice_enabled: bool = True
@@ -88,6 +88,20 @@ class AppConfig:
     prefer_phone_calendar: bool = True
     google_calendar_fallback_enabled: bool = True
 
+
+    # v27 specialist-agent foundation. Profiles are lightweight identities that
+    # share the same local model; the resource governor prevents uncontrolled fan-out.
+    agent_mesh_enabled: bool = True
+    agent_max_active_specialists: int = 6
+    agent_max_parallel_llm: int = 2
+    resource_governor_enabled: bool = True
+    resource_ram_warn_percent: float = 75.0
+    resource_ram_stop_percent: float = 85.0
+    resource_vram_warn_percent: float = 85.0
+    resource_vram_stop_percent: float = 92.0
+    resource_gpu_temp_warn_c: float = 80.0
+    resource_gpu_temp_stop_c: float = 84.0
+
     # Personality / behavior
     tone_mode: str = "Respectful"
     address_name: str = "sir"
@@ -105,7 +119,14 @@ class AppConfig:
     conversation_mode_enabled: bool = True
     conversation_timeout_seconds: float = 35.0
     conversation_followup_max_turns: int = 5
-    interruption_enabled: bool = True
+    interruption_enabled: bool = False
+    speech_finish_sentence_on_interrupt: bool = True
+    tts_sentence_pause_ms: int = 70
+    tts_retry_once: bool = True
+
+    # v28 phone and spatial-vision behavior
+    phone_dns_fallback_enabled: bool = True
+    hololab_enabled: bool = True
 
     # Wake phrases groundwork
     wake_phrases: str = "Hey Jarvis, Jarvis, Wake up Jarvis"
@@ -153,6 +174,29 @@ class AppConfig:
             # preferred source when a companion is connected.
             if not str(data.get("weather_location") or "").strip():
                 cfg.weather_location = "Netanya, Israel"
+        if old_version < 27:
+            cfg.config_version = 27
+            # v27 keeps the local model shared between specialist identities and
+            # starts with conservative limits suitable for an 8 GB class GPU.
+            cfg.agent_max_parallel_llm = min(2, max(1, int(getattr(cfg, "agent_max_parallel_llm", 2))))
+            cfg.agent_max_active_specialists = min(6, max(2, int(getattr(cfg, "agent_max_active_specialists", 6))))
+        if old_version < 28:
+            cfg.config_version = 28
+            # v28 never blocks the foreground assistant merely because background
+            # fan-out is throttled, and speech interruption is deferred until the
+            # current sentence has completed.
+            cfg.speech_finish_sentence_on_interrupt = True
+            cfg.phone_dns_fallback_enabled = True
+            cfg.hololab_enabled = True
+        if old_version < 281:
+            # v28.1 hotfix: English-first STT avoids multilingual Whisper
+            # interpreting accented English as Hebrew unless bilingual Auto mode
+            # is explicitly selected later in Settings.
+            cfg.config_version = 281
+            if str(data.get("language_mode") or "Auto") == "Auto":
+                cfg.language_mode = "English"
+            # Normal follow-up input is queued until the spoken reply is complete.
+            cfg.interruption_enabled = False
         if not str(cfg.searxng_base_url).strip():
             cfg.searxng_base_url = "http://localhost:8888"
         if not str(cfg.ai_base_url).strip():

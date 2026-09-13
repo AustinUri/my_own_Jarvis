@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -13,9 +13,10 @@ from phone.bridge import CompanionHub
 
 
 class PhoneBridgeServer:
-    def __init__(self, hub: CompanionHub) -> None:
+    def __init__(self, hub: CompanionHub, ask_callback: Callable[[str, str], dict[str, Any]] | None = None) -> None:
         self.hub = hub
-        self.app = FastAPI(title="JARVIS Phone Bridge", version="26")
+        self.ask_callback = ask_callback
+        self.app = FastAPI(title="JARVIS Phone Bridge", version="28")
         self._pair_attempts: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
         self._configure_routes()
@@ -49,7 +50,7 @@ class PhoneBridgeServer:
         @app.get("/api/phone/health")
         async def health() -> dict[str, Any]:
             # Deliberately contains no personal data and does not expose pairing state.
-            return {"ok": True, "version": 26, "service": "jarvis-phone-bridge"}
+            return {"ok": True, "version": 28, "build": "28.2", "service": "jarvis-phone-bridge"}
 
         @app.post("/api/phone/pair")
         async def pair(request: Request) -> JSONResponse:
@@ -69,6 +70,24 @@ class PhoneBridgeServer:
             except ValueError as exc:
                 raise HTTPException(status_code=403, detail=str(exc)) from exc
             return JSONResponse(out)
+
+        @app.post("/api/phone/ask")
+        async def ask(request: Request) -> JSONResponse:
+            body = await request.body()
+            device = await self._auth(request, body)
+            if self.ask_callback is None:
+                raise HTTPException(status_code=503, detail="Remote JARVIS chat is not connected.")
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid JSON.")
+            text = str(payload.get("text") or "").strip()
+            if not text:
+                raise HTTPException(status_code=400, detail="Question is empty.")
+            if len(text) > 6000:
+                raise HTTPException(status_code=400, detail="Question is too long.")
+            result = await __import__("asyncio").to_thread(self.ask_callback, text, device)
+            return JSONResponse(result)
 
         @app.post("/api/phone/poll")
         async def poll(request: Request) -> JSONResponse:

@@ -1,1 +1,1 @@
-# v26 companion has no reflection-heavy third-party libraries.
+# v28 companion has no reflection-heavy third-party libraries.

@@ -14,11 +14,11 @@ class WorkspaceTray:
     def __init__(self, app: QApplication, orchestrator, url: str, quit_callback, service_manager=None):
         self.app = app
         self.orchestrator = orchestrator
-        self.url = url
+        self.url = url.rstrip('/') + '/?build=28.1'
         self.quit_callback = quit_callback
         self.service_manager = service_manager
         self.icon = QSystemTrayIcon(self._make_icon(), app)
-        self.icon.setToolTip('JARVIS v26 — background runtime active')
+        self.icon.setToolTip('JARVIS v28.1 — background runtime active')
         self.menu = QMenu()
 
         open_action = QAction('Open JARVIS Control Center', self.menu)

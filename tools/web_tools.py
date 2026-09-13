@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.parse
 import urllib.request
 import webbrowser
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
@@ -240,13 +241,20 @@ def search_web_evidence(query: str, config: AppConfig, limit: int = 8) -> list[d
         return []
     ranked = _rank_results(cleaned, results)
     out: list[dict[str, Any]] = []
+    tokens = _query_tokens(cleaned)
     for item in ranked[: max(1, min(20, int(limit)))]:
         title = _clean_text(str(item.get("title") or ""))
         url = str(item.get("url") or "").strip()
         snippet = _clean_text(str(item.get("content") or item.get("snippet") or ""))
         if not title or not url:
             continue
-        # A weak/empty snippet is still allowed when the title is informative.
+        # Reject obvious search-engine garbage even if an upstream engine gave
+        # it a score.  At least one meaningful query token should appear unless
+        # the source is one of our preferred authority domains.
+        haystack = f"{title} {snippet}".lower()
+        host = urllib.parse.urlparse(url).netloc.lower()
+        if tokens and not any(tok in haystack for tok in tokens) and not any(d in host for d in PREFERRED_FACT_DOMAINS):
+            continue
         if snippet and _is_dirty_text(snippet):
             snippet = ""
         out.append({
@@ -257,7 +265,47 @@ def search_web_evidence(query: str, config: AppConfig, limit: int = 8) -> list[d
             "engine": item.get("engine") or "",
             "score": item.get("score") or 0,
         })
+    if out:
+        return out
+    # Free, keyless fallback for current-news discovery.  This keeps the daily
+    # briefing useful when scraped search engines are CAPTCHA/rate limited.
+    return _google_news_rss_evidence(cleaned, limit=limit) if _looks_news_query(cleaned) else []
+
+
+def _looks_news_query(query: str) -> bool:
+    low = query.lower()
+    return bool(re.search(r"\b(news|latest|today|breaking|developments|results|headlines|update)\b", low)) or _looks_hebrew(query) and any(x in query for x in ("חדשות", "היום", "עדכון", "אחרונות"))
+
+
+def _google_news_rss_evidence(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    # Google News RSS requires no API key.  It is a discovery fallback only;
+    # JARVIS still presents the original publisher title/source to the model.
+    params = urllib.parse.urlencode({"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+    url = "https://news.google.com/rss/search?" + params
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=12.0) as response:
+            root = ET.fromstring(response.read())
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for item in root.findall("./channel/item")[: max(1, min(20, int(limit)))]:
+        title = _clean_text(item.findtext("title") or "")
+        link = (item.findtext("link") or "").strip()
+        published = (item.findtext("pubDate") or "").strip()
+        source_el = item.find("source")
+        source_name = _clean_text(source_el.text if source_el is not None and source_el.text else "Google News")
+        if title and link:
+            out.append({"title": title[:220], "url": link, "snippet": source_name, "published": published, "engine": "google-news-rss", "score": 1})
     return out
+
+
+def _answer_with_google_news_rss(query: str) -> WebAnswer | None:
+    rows = _google_news_rss_evidence(query, limit=8)
+    if not rows:
+        return None
+    answer = _synthesize_from_results(query, rows) or "\n".join(f"- {r['title']}" for r in rows[:6])
+    return WebAnswer(answer=answer, spoken_text=_short_spoken_answer(answer), source_lines=_format_sources(rows, limit=5), provider="google-news-rss", query=query)
 
 
 def answer_web_question(query: str, config: AppConfig) -> WebAnswer:
@@ -283,6 +331,11 @@ def answer_web_question(query: str, config: AppConfig) -> WebAnswer:
 
     if config.tavily_api_key.strip():
         answer = _answer_with_tavily(cleaned, config)
+        if answer is not None:
+            return answer
+
+    if _looks_news_query(cleaned):
+        answer = _answer_with_google_news_rss(cleaned)
         if answer is not None:
             return answer
 

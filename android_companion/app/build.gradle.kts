@@ -10,8 +10,8 @@ android {
         applicationId = "com.jarvis.companion"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1-v26"
+        versionCode = 5
+        versionName = "0.5-v28.2"
     }
 
     buildTypes {
@@ -25,4 +25,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+
+dependencies {
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

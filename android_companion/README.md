@@ -1,4 +1,14 @@
-# JARVIS Companion for Android — v26 security-first alpha
+# JARVIS Android Companion v28.2
+
+The phone is now both a secure companion and a remote JARVIS client.
+
+- Pair with the HTTPS `*.ts.net` URL.
+- Optional PC Tailscale IPv4 is only a DNS fallback; TLS still validates the `.ts.net` hostname.
+- ASK JARVIS sends a signed request to the home JARVIS core and shows the answer on the phone.
+- VOICE uses Android speech recognition to fill/send a question.
+- Phone voice replies use Android TextToSpeech and can be disabled.
+- Existing native-calendar, battery, and device-info functions remain.
+# JARVIS Companion for Android — v28 security-first alpha
 
 This project is intentionally narrow. It exposes **native/system calendar read access** and basic device status to a paired JARVIS PC. It does **not** request Accessibility, contacts, SMS, microphone, camera, location, device-admin, notification-listener, storage, or `WRITE_CALENDAR` permissions.
 

@@ -1,1 +1,1 @@
-"""JARVIS v26 workspace/control-center runtime."""
+"""JARVIS v28 workspace/control-center runtime."""

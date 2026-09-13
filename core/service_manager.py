@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.user_paths import jarvis_data_dir
+from core.tailscale import run_tailscale, tailscale_executable
 
 
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -94,16 +95,15 @@ class ServiceManager:
         docker_ok = self._docker_ready()
         self._set('docker', 'online' if docker_ok else 'offline')
         self._set('searxng', 'online' if self._searxng_ready() else 'offline')
-        self._set('tailscale', 'online' if self._tailscale_ready() else ('missing' if not shutil.which('tailscale') else 'offline'))
+        self._set('tailscale', 'online' if self._tailscale_ready() else ('missing' if not tailscale_executable() else 'offline'))
         self._set('phone_bridge', 'online' if self._phone_bridge_ready() else 'offline')
 
 
     def _tailscale_ready(self) -> bool:
-        exe = shutil.which('tailscale')
-        if not exe:
+        if not tailscale_executable():
             return False
         try:
-            result = subprocess.run([exe, 'status', '--json'], capture_output=True, text=True, timeout=6, creationflags=CREATE_NO_WINDOW)
+            result = run_tailscale(['status', '--json'], timeout=6)
             if result.returncode != 0:
                 return False
             data = json.loads(result.stdout or '{}')
@@ -121,7 +121,7 @@ class ServiceManager:
             return False
 
     def _http_json(self, url: str, timeout: float = 3.0):
-        req = urllib.request.Request(url, headers={'User-Agent': 'JarvisLocalAssistant/26'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'JarvisLocalAssistant/27'})
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode('utf-8', errors='replace'))
 
@@ -174,7 +174,7 @@ class ServiceManager:
         if not docker:
             return False
         try:
-            result = subprocess.run([docker, 'version', '--format', '{{.Server.Version}}'], capture_output=True, text=True, timeout=6, creationflags=CREATE_NO_WINDOW)
+            result = subprocess.run([docker, 'version', '--format', '{{.Server.Version}}'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=6, creationflags=CREATE_NO_WINDOW)
             return result.returncode == 0 and bool(result.stdout.strip())
         except Exception:
             return False
@@ -225,7 +225,7 @@ class ServiceManager:
             return
         self._set('docker', 'online')
 
-        inspect = subprocess.run([docker, 'inspect', 'searxng'], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        inspect = subprocess.run([docker, 'inspect', 'searxng'], capture_output=True, text=True, encoding='utf-8', errors='replace', creationflags=CREATE_NO_WINDOW)
         if inspect.returncode != 0:
             self._create_managed_searxng(docker)
         else:
@@ -263,4 +263,4 @@ class ServiceManager:
 
     @staticmethod
     def _run_hidden(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
-        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, creationflags=CREATE_NO_WINDOW)
+        return subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout, creationflags=CREATE_NO_WINDOW)

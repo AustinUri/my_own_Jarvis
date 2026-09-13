@@ -19,20 +19,27 @@ from workspace.server import WorkspaceServer
 from workspace.tray import WorkspaceTray
 from workspace.activity import ActivityTimeline
 from vision.camera_state import CameraState
+from vision.hololab import run_visual_tests
 from phone.bridge import CompanionHub
 from phone.server import PhoneBridgeServer
+from core.agent_mesh import AgentMesh
+from core.resource_governor import ResourceGovernor
+from workspace.surface_browser import SurfaceBrowser
 
 
 class CommandRouter(QObject):
     incoming = Signal(dict)
 
-    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CompanionHub):
+    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CompanionHub, agent_mesh: AgentMesh, resource_governor: ResourceGovernor):
         super().__init__()
         self.bridge = bridge
         self.camera_state = camera_state
         self.publish = publish
         self.orchestrator = orchestrator
         self.phone_hub = phone_hub
+        self.agent_mesh = agent_mesh
+        self.resource_governor = resource_governor
+        self.surface_browser = SurfaceBrowser()
         self.incoming.connect(self._dispatch)
 
     def _thread(self, target, name: str) -> None:
@@ -43,7 +50,8 @@ class CommandRouter(QObject):
         action = str(message.get('action') or '').strip()
         payload = message.get('payload') or {}
         if action == 'submit_text':
-            self.bridge.submit_text.emit(str(payload.get('text') or ''))
+            text = str(payload.get('text') or '')
+            self.bridge.submit_text.emit(text)
         elif action == 'push_to_talk':
             self.bridge.push_to_talk.emit()
         elif action == 'test_microphone':
@@ -74,6 +82,10 @@ class CommandRouter(QObject):
             )
             if accepted:
                 self.publish('camera_status', self.camera_state.status())
+        elif action == 'hololab_test':
+            self.publish('hololab_result', run_visual_tests(dict(payload)))
+        elif action == 'surface_open_native':
+            self.publish('surface_status', self.surface_browser.open(str(payload.get('url') or '')))
         elif action == 'refresh_briefing':
             def run_briefing():
                 self.publish('briefing_status', {'status': 'working'})
@@ -124,6 +136,28 @@ class CommandRouter(QObject):
             self.publish('phone_status', self.phone_hub.status())
         elif action == 'phone_status':
             self.publish('phone_status', self.phone_hub.status())
+        elif action == 'phone_device_info':
+            def phone_device_info():
+                try:
+                    result = self.phone_hub.request("device_info", {})
+                    self.publish('phone_diagnostics', {"phone_function": "device_info", "result": result})
+                except Exception as exc:
+                    self.publish('phone_diagnostics', {"phone_function": "device_info", "error": str(exc)})
+            self._thread(phone_device_info, 'jarvis-phone-device-info')
+        elif action == 'phone_battery':
+            def phone_battery():
+                try:
+                    result = self.phone_hub.request("battery_status", {})
+                    self.publish('phone_diagnostics', {"phone_function": "battery_status", "result": result})
+                except Exception as exc:
+                    self.publish('phone_diagnostics', {"phone_function": "battery_status", "error": str(exc)})
+            self._thread(phone_battery, 'jarvis-phone-battery')
+        elif action == 'phone_diagnose':
+            def diagnose_phone():
+                result = self.phone_hub.diagnostics()
+                self.publish('phone_diagnostics', result)
+                self.publish('phone_status', self.phone_hub.status())
+            self._thread(diagnose_phone, 'jarvis-phone-diagnostics')
         elif action == 'phone_revoke_all':
             count = self.phone_hub.revoke_all()
             self.publish('phone_pairing', {})
@@ -156,14 +190,14 @@ def main(argv: list[str] | None = None) -> int:
         'transcript': '', 'response': '', 'responseLanguage': 'en', 'spoken': '',
         'logs': [], 'activity': [], 'error': '', 'dailyBriefing': orchestrator.tools.daily_briefing_service.cached(),
         'weather': {}, 'calendarStatus': orchestrator.tools.calendar_status_data(), 'calendarEvents': [],
-        'f1Lesson': {}, 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneTransport': {},
+        'f1Lesson': {}, 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneTransport': {}, 'phoneDiagnostics': {}, 'agentMesh': {}, 'hololabResult': {}, 'surfaceStatus': {},
     }
 
     server: WorkspaceServer | None = None
 
     def snapshot() -> dict:
         return {
-            'version': 26,
+            'version': 28, 'build': '28.2',
             'runtime': dict(state),
             'config': asdict(config),
             'aiStatus': state.get('aiStatus', 'Checking AI provider…'),
@@ -177,6 +211,10 @@ def main(argv: list[str] | None = None) -> int:
             'phoneStatus': state.get('phoneStatus') or {},
             'phonePairing': state.get('phonePairing') or {},
             'phoneTransport': state.get('phoneTransport') or {},
+            'phoneDiagnostics': state.get('phoneDiagnostics') or {},
+            'agentMesh': state.get('agentMesh') or {},
+            'hololabResult': state.get('hololabResult') or {},
+            'surfaceStatus': state.get('surfaceStatus') or {},
             'activity': state.get('activity') or [],
         }
 
@@ -190,6 +228,10 @@ def main(argv: list[str] | None = None) -> int:
         elif event_type == 'phone_status': state['phoneStatus'] = payload
         elif event_type == 'phone_pairing': state['phonePairing'] = payload
         elif event_type == 'phone_transport': state['phoneTransport'] = payload
+        elif event_type == 'phone_diagnostics': state['phoneDiagnostics'] = payload
+        elif event_type == 'agent_mesh': state['agentMesh'] = payload
+        elif event_type == 'hololab_result': state['hololabResult'] = payload
+        elif event_type == 'surface_status': state['surfaceStatus'] = payload
         elif event_type == 'activity': state['activity'] = activity.snapshot()
         if server is not None:
             server.publish(event_type, payload)
@@ -202,8 +244,12 @@ def main(argv: list[str] | None = None) -> int:
     state['phoneStatus'] = phone_hub.status()
     state['calendarStatus'] = orchestrator.tools.calendar_status_data()
 
+    resource_governor = ResourceGovernor(config)
+    agent_mesh = AgentMesh(config)
+    state['agentMesh'] = agent_mesh.snapshot(resource=resource_governor.snapshot().to_dict())
+
     bridge = WorkspaceBridge(orchestrator, config, config_path, publish)
-    router = CommandRouter(bridge, camera_state, publish, orchestrator, phone_hub)
+    router = CommandRouter(bridge, camera_state, publish, orchestrator, phone_hub, agent_mesh, resource_governor)
     profile_store = WorkspaceProfileStore()
 
     briefing_started = threading.Event()
@@ -268,12 +314,20 @@ def main(argv: list[str] | None = None) -> int:
     def on_transcript(text: str, lang: str) -> None:
         state['transcript'] = text
         publish('transcript', {'text': text, 'language': lang})
+        if (text or '').strip() and text != '[nothing heard]' and getattr(config, 'agent_mesh_enabled', True):
+            try:
+                resources = resource_governor.snapshot().to_dict()
+                publish('agent_mesh', agent_mesh.route(text, resource=resources))
+            except Exception as exc:
+                add_log(f'Agent Mesh routing warning: {exc}')
         push_activity(activity.input(text, source='voice-or-text'))
 
     def on_response(text: str, lang: str) -> None:
         state['response'] = text
         state['responseLanguage'] = lang
         publish('response', {'text': text, 'language': lang})
+        if getattr(config, 'agent_mesh_enabled', True):
+            publish('agent_mesh', agent_mesh.complete(resource=resource_governor.snapshot().to_dict()))
         push_activity(activity.output(text))
 
     def on_error(text: str) -> None:
@@ -300,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # The companion API never binds to LAN/WAN interfaces. Tailscale Serve may
     # proxy this localhost port over tailnet-only HTTPS after explicit setup.
-    phone_server = PhoneBridgeServer(phone_hub)
+    phone_server = PhoneBridgeServer(phone_hub, ask_callback=lambda text, device: orchestrator.process_remote_text(text, source=f'phone:{device}'))
     phone_uvicorn_config = uvicorn.Config(phone_server.app, host='127.0.0.1', port=int(getattr(config, 'phone_bridge_port', 8766)), log_level='warning')
     phone_uvicorn_server = uvicorn.Server(phone_uvicorn_config)
     phone_thread = threading.Thread(target=phone_uvicorn_server.run, name='jarvis-phone-bridge', daemon=True)

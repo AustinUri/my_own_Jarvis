@@ -106,6 +106,8 @@ class ToolRegistry:
             self._tool("calendar_create_event", "Create an event using Google Calendar backup for now. Native phone-calendar writing is intentionally deferred until the user explicitly grants write permission. Only use on an explicit request to create/add/schedule an event.", {"summary": self._string("Event title."), "start_iso": self._string("Start date/time as ISO 8601 with timezone when possible."), "end_iso": self._string("End date/time as ISO 8601 with timezone when possible."), "location": self._string("Optional event location."), "description": self._string("Optional description.")}, ["summary","start_iso","end_iso"]),
             self._tool("get_daily_briefing", "Return Jarvis's cached daily briefing, including selected news, sports, F1 learning, weather and calendar. Refresh it when requested.", {"refresh": {"type":"boolean","description":"Set true only when the user asks for a refresh/latest briefing."}}, []),
             self._tool("phone_status", "Check whether the trusted JARVIS phone companion is paired and currently connected. This does not access phone content.", {}, []),
+            self._tool("phone_device_info", "Read basic non-sensitive device information from the paired phone, such as manufacturer, model and Android version.", {}, []),
+            self._tool("phone_battery_status", "Read the paired phone battery percentage and whether it is charging.", {}, []),
             self._tool("f1_next_lesson", "Get the next Formula 1 learning topic from the user's persistent learning progression. Use when the user asks Jarvis to teach them something new about F1.", {}, []),
             self._tool("analyze_camera", "Inspect the latest frame from the explicitly enabled JARVIS Camera widget. Use only when the user asks what you can see, asks whether you can see them/an object, or asks you to inspect the camera.", {"prompt": self._string("What to inspect or describe in the camera frame.")}, ["prompt"]),
             self._tool("open_folder", "Open a common local folder when explicitly requested.", {"folder": self._string("One of desktop, downloads, documents, pictures, music, videos.")}, ["folder"]),
@@ -117,10 +119,12 @@ class ToolRegistry:
             self._tool("search_files", "Search Jarvis's project/local search scope for matching files.", {"query": self._string("Filename or search phrase.")}, ["query"]),
             self._tool("lock_computer", "Lock the Windows computer. Use only on an explicit request.", {}, []),
             self._tool("shutdown_request", "Request a PC shutdown. This tool does not shut down immediately; it returns that confirmation is required.", {}, []),
-            self._tool("ui_show_panel", "Show a JARVIS workspace panel when the user explicitly asks to see it. Valid panel IDs include orb, conversation, briefing, weather, calendar, sports, learning, services, phone, activity, sources, system, context, camera, settings.", {"panel": self._string("Workspace panel ID.")}, ["panel"]),
+            self._tool("ui_show_panel", "Show a JARVIS workspace panel when the user explicitly asks to see it. Valid panel IDs include orb, conversation, briefing, weather, calendar, sports, learning, services, phone, activity, sources, system, context, camera, agentmesh, surface, settings.", {"panel": self._string("Workspace panel ID.")}, ["panel"]),
             self._tool("ui_hide_panel", "Hide a JARVIS workspace panel when the user explicitly asks to hide/close that panel.", {"panel": self._string("Workspace panel ID.")}, ["panel"]),
             self._tool("ui_switch_workspace", "Switch the JARVIS workspace layout when the user explicitly asks. Use the exact workspace/mode name requested by the user; custom saved modes are allowed.", {"workspace": self._string("Workspace name.")}, ["workspace"]),
             self._tool("ui_create_workspace", "Create a persistent custom JARVIS mode/workspace by cloning the current layout. Use only when the user explicitly asks to create/save a new mode.", {"workspace": self._string("Name for the new mode/workspace.")}, ["workspace"]),
+            self._tool("ui_hololab_config", "Configure the HoloLab visual prototype when the user explicitly asks to change the holographic object.", {"enabled": {"type":"boolean","description":"Whether HoloLab should be active."}, "shape": self._string("cube, sphere, ring, cylinder, or gauntlet."), "material": self._string("aluminium, titanium, steel, ABS, PLA, or polycarbonate."), "width_mm": {"type":"number"}, "height_mm": {"type":"number"}, "depth_mm": {"type":"number"}}, []),
+            self._tool("ui_open_surface", "Bring an explicitly requested normal website/domain into the JARVIS Surface Dock. Use this when the user asks to show a web surface inside the JARVIS layout. Games, DRM/UAC-sensitive software, and normal desktop applications should remain external instead of being force-embedded.", {"target": self._string("HTTPS URL or domain to show inside JARVIS."), "title": self._string("Optional short title for the surface.")}, ["target"]),
         ]
 
     @staticmethod
@@ -174,6 +178,14 @@ class ToolRegistry:
             return self.daily_briefing_service.generate(force=bool(action.args.get("refresh", False)))
         if action.name == "phone_status":
             return self.phone_status_data()
+        if action.name == "phone_device_info":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            return self._phone_hub.request("device_info", {})
+        if action.name == "phone_battery_status":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            return self._phone_hub.request("battery_status", {})
         if action.name == "f1_next_lesson":
             return self.f1_learning_service.next_lesson()
         if action.name == "analyze_camera":
@@ -205,7 +217,7 @@ class ToolRegistry:
             return lock_computer()
         if action.name == "shutdown_request":
             return "Confirmation required. No shutdown was executed."
-        if action.name in {"ui_show_panel", "ui_hide_panel", "ui_switch_workspace", "ui_create_workspace"}:
+        if action.name in {"ui_show_panel", "ui_hide_panel", "ui_switch_workspace", "ui_create_workspace", "ui_open_surface", "ui_hololab_config"}:
             if self._ui_event_sink is None:
                 return "Workspace UI is not connected."
             payload = dict(action.args)

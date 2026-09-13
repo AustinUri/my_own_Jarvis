@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 
 EXPLICIT_ACTION_RE = re.compile(
-    r"\b(open|launch|run|start|close|quit|kill|show|hide|switch|bring\s+up|navigate|go\s+to|lock|shutdown|turn\s+off|create|write|save|search\s+for|find)\b"
+    r"\b(open|launch|run|start|close|quit|kill|show|hide|switch|bring\s+up|bring|pull\s+up|dock|embed|navigate|go\s+to|lock|shutdown|turn\s+off|create|write|save|search\s+for|find)\b"
     r"|(?:פתח|תפתח|תפעיל|תריץ|סגור|תסגור|תציג|תראה|תביא|נעל|כבה|כתוב|תרשום|שמור|חפש|מצא)",
     re.IGNORECASE,
 )
@@ -28,6 +28,7 @@ UI_MUTATING_TOOLS = {
     "ui_hide_panel",
     "ui_switch_workspace",
     "ui_create_workspace",
+    "ui_open_surface",
     "calendar_connect",
     "calendar_create_event",
 }

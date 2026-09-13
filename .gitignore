@@ -119,3 +119,5 @@ android_companion/*.iml
 # =========================
 .gradle/
 .cache/
+android_companion/.gradle/
+android_companion/local.properties

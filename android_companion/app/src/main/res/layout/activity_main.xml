@@ -1,89 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#061018"
-    android:fillViewport="true">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="J.A.R.V.I.S. COMPANION"
-            android:textColor="#8FEFFF"
-            android:textSize="25sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Security-first v26: native calendar read access only. No Accessibility, SMS, contacts, microphone or device-admin permission."
-            android:textColor="#A7BBC8"
-            android:textSize="14sp" />
-
-        <EditText
-            android:id="@+id/serverUrl"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:hint="https://your-pc.your-tailnet.ts.net"
-            android:inputType="textUri"
-            android:textColor="#EAFBFF"
-            android:textColorHint="#68808F" />
-
-        <EditText
-            android:id="@+id/pairCode"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="8-digit pairing code"
-            android:inputType="number"
-            android:maxLength="8"
-            android:textColor="#EAFBFF"
-            android:textColorHint="#68808F" />
-
-        <Button
-            android:id="@+id/pairButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="PAIR WITH JARVIS PC" />
-
-        <Button
-            android:id="@+id/calendarPermissionButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="ALLOW NATIVE CALENDAR READ ACCESS" />
-
-        <Button
-            android:id="@+id/startButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="START SECURE COMPANION" />
-
-        <Button
-            android:id="@+id/stopButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="STOP COMPANION" />
-
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:background="#0B1B27"
-            android:padding="16dp"
-            android:text="Not paired."
-            android:textColor="#D9F7FF"
-            android:textIsSelectable="true" />
-    </LinearLayout>
-</ScrollView>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#061018" android:fillViewport="true">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="22dp">
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="J.A.R.V.I.S. MOBILE" android:textColor="#8FEFFF" android:textSize="25sp" android:textStyle="bold" />
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="V28.2 · secure remote client + phone companion" android:textColor="#A7BBC8" android:textSize="13sp" />
+<EditText android:id="@+id/serverUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" android:hint="https://your-pc.your-tailnet.ts.net" android:inputType="textUri" android:textColor="#EAFBFF" android:textColorHint="#68808F" />
+<EditText android:id="@+id/fallbackIp" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="PC Tailscale IPv4 fallback" android:inputType="text" android:textColor="#EAFBFF" android:textColorHint="#68808F" />
+<EditText android:id="@+id/pairCode" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="8-digit pairing code" android:inputType="number" android:maxLength="8" android:textColor="#EAFBFF" android:textColorHint="#68808F" />
+<Button android:id="@+id/testConnectionButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="TEST PRIVATE CONNECTION" />
+<Button android:id="@+id/pairButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="PAIR WITH JARVIS PC" />
+<Button android:id="@+id/startButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="START BACKGROUND LINK" />
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="REMOTE JARVIS" android:textColor="#FFCC78" android:textStyle="bold" android:textSize="15sp" />
+<EditText android:id="@+id/askText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:minLines="2" android:maxLines="5" android:gravity="top" android:hint="Ask JARVIS from your phone…" android:inputType="textMultiLine" android:textColor="#EAFBFF" android:textColorHint="#68808F" />
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"><Button android:id="@+id/askButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="ASK JARVIS" /><Button android:id="@+id/voiceAskButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="VOICE" /></LinearLayout>
+<Button android:id="@+id/voiceReplyButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="PHONE VOICE REPLIES: ON" />
+<TextView android:id="@+id/jarvisReply" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:minHeight="100dp" android:background="#0B1B27" android:padding="14dp" android:text="JARVIS replies will appear here." android:textColor="#D9F7FF" android:textIsSelectable="true" />
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" android:text="PHONE DATA AVAILABLE TO JARVIS" android:textColor="#8FEFFF" android:textStyle="bold" />
+<Button android:id="@+id/calendarPermissionButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="ALLOW NATIVE CALENDAR READ ACCESS" />
+<Button android:id="@+id/stopButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="STOP BACKGROUND LINK" />
+<TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:background="#0B1B27" android:padding="14dp" android:text="Not paired." android:textColor="#A8DCE8" android:textIsSelectable="true" />
+</LinearLayout></ScrollView>

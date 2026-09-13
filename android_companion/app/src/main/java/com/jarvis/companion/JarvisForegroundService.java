@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
+import android.os.BatteryManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
@@ -74,11 +75,19 @@ public final class JarvisForegroundService extends Service {
                 info.put("manufacturer", Build.MANUFACTURER);
                 info.put("model", Build.MODEL);
                 info.put("android", Build.VERSION.RELEASE);
+                info.put("sdk", Build.VERSION.SDK_INT);
                 out.put("ok", true);
                 out.put("device", info);
+            } else if ("battery_status".equals(command)) {
+                BatteryManager bm = (BatteryManager)getSystemService(BATTERY_SERVICE);
+                int pct = bm == null ? -1 : bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+                boolean charging = bm != null && Build.VERSION.SDK_INT >= 23 && bm.isCharging();
+                out.put("ok", true);
+                out.put("battery_percent", pct);
+                out.put("charging", charging);
             } else {
                 out.put("ok", false);
-                out.put("error", "Unsupported command. This v26 companion deliberately exposes only approved capabilities.");
+                out.put("error", "Unsupported command. This v28 companion deliberately exposes only approved capabilities.");
             }
         } catch (Exception ex) {
             try {

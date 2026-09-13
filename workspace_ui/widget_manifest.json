@@ -142,5 +142,23 @@
       "w": 5,
       "h": 8
     }
+  },
+  {
+    "id": "agentmesh",
+    "title": "Agent Mesh",
+    "category": "intelligence",
+    "default": {
+      "w": 4,
+      "h": 8
+    }
+  },
+  {
+    "id": "surface",
+    "title": "Surface Dock",
+    "category": "ui",
+    "default": {
+      "w": 5,
+      "h": 8
+    }
   }
 ]

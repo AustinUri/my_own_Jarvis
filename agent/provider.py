@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -9,6 +10,12 @@ from typing import Any
 
 class ProviderError(RuntimeError):
     pass
+
+
+# Hard process-wide ceiling for expensive local generations. Even when future
+# specialist agents fan out, v27 never allows more than two LM Studio chat
+# requests to generate at the same time.
+_LOCAL_LLM_SLOTS = threading.BoundedSemaphore(2)
 
 
 @dataclass(slots=True)
@@ -76,9 +83,15 @@ class OpenAICompatibleProvider:
             headers=self._headers(),
             method="POST",
         )
+        acquired = _LOCAL_LLM_SLOTS.acquire(timeout=max(5.0, min(float(self.timeout), 60.0)))
+        if not acquired:
+            raise ProviderError("Local AI concurrency guard is busy; try again in a moment.")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                raw = json.loads(response.read().decode("utf-8"))
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                    raw = json.loads(response.read().decode("utf-8"))
+            finally:
+                _LOCAL_LLM_SLOTS.release()
         except urllib.error.HTTPError as exc:
             detail = ""
             try:

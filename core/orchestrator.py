@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, Signal
 
 from core.config import AppConfig
 from core.events import AssistantReply, AssistantState
+from core.resource_governor import ResourceGovernor
 from agent.jarvis_agent import JarvisAgent
 from stt.whisper_engine import WhisperEngine
 from tools.registry import ToolRegistry
@@ -40,6 +41,7 @@ class Orchestrator(QObject):
         self.config = config
         self.tools = ToolRegistry(base_dir, config)
         self.agent = JarvisAgent(config, self.tools, log=self.log_ready.emit)
+        self.resource_governor = ResourceGovernor(config)
         self.speaker = Speaker(config)
         self.aliases_path = base_dir / 'memory' / 'custom_aliases.json'
         self._ensure_custom_aliases_file()
@@ -62,6 +64,7 @@ class Orchestrator(QObject):
         self.whisper.command_min_seconds = config.command_min_seconds
         self.whisper.command_preroll_seconds = config.command_preroll_seconds
         self._busy = False
+        self._agent_lock = threading.RLock()
         self._enabled = config.assistant_enabled
         self._state = AssistantState.IDLE if config.assistant_enabled else AssistantState.DISABLED
         self._queued_text_after_interrupt: str | None = None
@@ -164,10 +167,9 @@ class Orchestrator(QObject):
         if not text.strip():
             return
         if self._busy:
-            if self._state == AssistantState.SPEAKING and self.config.interruption_enabled:
+            if self._state == AssistantState.SPEAKING:
                 self._queued_text_after_interrupt = text
-                self.log_ready.emit('Interrupt requested. Switching from speaking to your new command.')
-                self.interrupt_current_reply('Interrupted by a new typed command.')
+                self.log_ready.emit('Follow-up queued. JARVIS will finish the current spoken reply first.')
                 return
             self.log_ready.emit('Jarvis is already busy.')
             return
@@ -180,10 +182,9 @@ class Orchestrator(QObject):
             self.log_ready.emit('Assistant is disabled.')
             return
         if self._busy:
-            if self._state == AssistantState.SPEAKING and self.config.interruption_enabled:
+            if self._state == AssistantState.SPEAKING:
                 self._queued_voice_capture_after_interrupt = True
-                self.log_ready.emit('Interrupt requested. Switching from speaking to live listening.')
-                self.interrupt_current_reply('Interrupted by push-to-talk.')
+                self.log_ready.emit('Push-to-talk queued. JARVIS will finish speaking, then listen.')
                 return
             self.log_ready.emit('Jarvis is already busy.')
             return
@@ -211,13 +212,16 @@ class Orchestrator(QObject):
         threading.Thread(target=self._run_microphone_test, daemon=True).start()
 
 
-    def interrupt_current_reply(self, reason: str = 'Interrupted.') -> bool:
+    def interrupt_current_reply(self, reason: str = 'Explicit stop requested.') -> bool:
+        """Emergency/explicit stop only.
+
+        Normal text/PTT follow-ups are queued and never cancel speech in v28.1.
+        """
         if self._state != AssistantState.SPEAKING:
             return False
-        backend_message = self.speaker.stop()
+        backend_message = self.speaker.stop(force=True)
         self.log_ready.emit(reason)
         self.log_ready.emit(backend_message)
-        self._set_state(AssistantState.LISTENING)
         return True
 
     def _handle_interrupt_queue(self, restart_listener: bool) -> bool:
@@ -226,11 +230,11 @@ class Orchestrator(QObject):
         self._queued_text_after_interrupt = None
         self._queued_voice_capture_after_interrupt = False
         if queued_text:
-            self.log_ready.emit('Running interrupted follow-up command now.')
+            self.log_ready.emit('Running queued follow-up command now.')
             self._run_pipeline(queued_text, restart_listener=restart_listener, finalize=True)
             return True
         if queued_voice:
-            self.log_ready.emit('Listening immediately after interruption.')
+            self.log_ready.emit('Listening for the queued follow-up now.')
             self._capture_then_process_voice(False)
             return True
         return False
@@ -477,7 +481,13 @@ class Orchestrator(QObject):
             time.sleep(0.05)
 
             self._set_state(AssistantState.THINKING)
-            reply = self.agent.process(text)
+            resource_state = self.resource_governor.snapshot()
+            if resource_state.state in {"protected", "pause"}:
+                # V28 protects the machine by reducing background fan-out, but it never
+                # rejects the user's foreground conversation merely because VRAM is high.
+                self.log_ready.emit(resource_state.reason)
+            with self._agent_lock:
+                reply = self.agent.process(text)
             self.log_ready.emit(f'Intent: {reply.intent}')
             if reply.provider:
                 self.log_ready.emit(f'AI provider: {reply.provider}')
@@ -492,8 +502,8 @@ class Orchestrator(QObject):
             self.log_ready.emit(backend if self.config.voice_enabled else 'Voice reply skipped.')
             if backend.startswith('TTS failed'):
                 self.error_raised.emit(backend)
-            if backend == 'Speech interrupted.':
-                self.log_ready.emit('Reply was interrupted so Jarvis can listen sooner.')
+            if backend.startswith('Speech interrupted'):
+                self.log_ready.emit('Reply interruption completed at a sentence boundary.')
             time.sleep(0.05)
             self._set_state(AssistantState.IDLE if self._enabled else AssistantState.DISABLED)
         except Exception as exc:
@@ -507,6 +517,29 @@ class Orchestrator(QObject):
                 if restart_listener and self._enabled and self.config.wake_word_enabled:
                     self._start_wake_word_listener()
                 self._busy = False
+
+    def process_remote_text(self, text: str, source: str = "phone") -> dict:
+        """Run a trusted remote turn and return the answer to the phone.
+
+        The desktop speaker is intentionally not used; the Android client may speak
+        the returned text locally. Shared agent memory keeps phone/PC context aligned.
+        """
+        clean = (text or "").strip()
+        if not clean:
+            return {"ok": False, "error": "Question is empty."}
+        try:
+            language = self.agent.detect_language(clean)
+            self.log_ready.emit(f"Remote JARVIS request received from {source}.")
+            with self._agent_lock:
+                reply = self.agent.process(clean)
+            self.transcript_ready.emit(f"[PHONE] {clean}", language)
+            self.response_ready.emit(reply.gui_text, reply.user_language)
+            return {"ok": True, "text": reply.gui_text, "spoken_text": reply.spoken_text,
+                    "language": reply.user_language, "intent": reply.intent,
+                    "provider": reply.provider, "tool_trace": list(reply.tool_trace)}
+        except Exception as exc:
+            self.log_ready.emit(f"Remote JARVIS request failed: {exc}")
+            return {"ok": False, "error": str(exc)}
 
     def clear_conversation_memory(self) -> None:
         self.agent.clear_memory()

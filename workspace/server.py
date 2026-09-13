@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import psutil
+
+from core.resource_governor import ResourceGovernor
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -70,7 +72,8 @@ class WorkspaceServer:
         self.profile_store = profile_store
         self.on_client_connected = on_client_connected
         self.manager = WorkspaceConnectionManager()
-        self.app = FastAPI(title="JARVIS Workspace API", version="26")
+        self.resource_governor = ResourceGovernor(config)
+        self.app = FastAPI(title="JARVIS Workspace API", version="28.1")
         self._configure_routes()
 
     def _configure_routes(self) -> None:
@@ -86,7 +89,7 @@ class WorkspaceServer:
 
         @app.get("/api/health")
         async def health() -> dict[str, Any]:
-            return {"ok": True, "version": 26}
+            return {"ok": True, "version": 28, "build": "28.1"}
 
         @app.get("/api/profiles")
         async def profiles() -> JSONResponse:
@@ -147,26 +150,24 @@ class WorkspaceServer:
             index_file = dist / "index.html"
             if not index_file.exists():
                 raise RuntimeError("Workspace UI has not been built. Run scripts/rebuild_workspace.ps1")
-            return FileResponse(index_file)
+            return FileResponse(index_file, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"})
 
         @app.get("/{full_path:path}")
         async def spa_fallback(full_path: str):
             candidate = dist / full_path
             if candidate.exists() and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(dist / "index.html")
+                return FileResponse(candidate, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"})
+            return FileResponse(dist / "index.html", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"})
 
     async def _metrics_loop(self) -> None:
         while True:
             try:
                 battery = psutil.sensors_battery()
+                metrics = self.resource_governor.snapshot().to_dict()
+                metrics["battery"] = None if battery is None else round(float(battery.percent), 1)
                 payload = {
                     "type": "system_metrics",
-                    "payload": {
-                        "cpu": round(psutil.cpu_percent(interval=None), 1),
-                        "ram": round(psutil.virtual_memory().percent, 1),
-                        "battery": None if battery is None else round(float(battery.percent), 1),
-                    },
+                    "payload": metrics,
                 }
                 await self.manager.broadcast(payload)
             except Exception:

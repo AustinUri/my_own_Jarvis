@@ -6,6 +6,7 @@ import json
 import queue
 import secrets
 import subprocess
+import urllib.request
 import threading
 import time
 import uuid
@@ -19,6 +20,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from core.user_paths import jarvis_data_dir
+from core.tailscale import run_tailscale, tailscale_executable
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -107,21 +109,31 @@ class CompanionHub:
         self._lock = threading.RLock()
 
     # ---------- transport / pairing ----------
-    def tailscale_url(self) -> str:
+    def tailscale_identity(self) -> dict[str, str]:
+        """Return the PC's private Tailscale HTTPS name and IPv4 address.
+
+        The Android companion keeps the HTTPS *.ts.net URL for TLS identity, while
+        V28 may use the 100.x address only as a DNS-resolution fallback.
+        """
         try:
-            result = subprocess.run(
-                ["tailscale", "status", "--json"],
-                capture_output=True, text=True, timeout=5, creationflags=CREATE_NO_WINDOW,
-            )
+            result = run_tailscale(["status", "--json"], timeout=6)
             if result.returncode != 0:
-                return ""
+                return {"server_url": "", "tailscale_ipv4": "", "dns_name": ""}
             data = json.loads(result.stdout or "{}")
-            dns = str(((data.get("Self") or {}).get("DNSName")) or "").strip().rstrip(".")
-            if dns:
-                return f"https://{dns}"
+            self_row = data.get("Self") or {}
+            dns = str(self_row.get("DNSName") or "").strip().rstrip(".")
+            ips = self_row.get("TailscaleIPs") or data.get("TailscaleIPs") or []
+            ipv4 = next((str(ip) for ip in ips if str(ip).startswith("100.")), "")
+            return {
+                "server_url": f"https://{dns}" if dns else "",
+                "tailscale_ipv4": ipv4,
+                "dns_name": dns,
+            }
         except Exception:
-            pass
-        return ""
+            return {"server_url": "", "tailscale_ipv4": "", "dns_name": ""}
+
+    def tailscale_url(self) -> str:
+        return self.tailscale_identity().get("server_url", "")
 
 
     def prepare_private_transport(self) -> dict[str, Any]:
@@ -132,18 +144,19 @@ class CompanionHub:
         HTTPS approval, the returned message tells the user what to do.
         """
         port = int(getattr(self.config, "phone_bridge_port", 8766))
-        url = self.tailscale_url()
+        identity = self.tailscale_identity()
+        url = identity.get("server_url", "")
+        fallback_ip = identity.get("tailscale_ipv4", "")
         if not url:
             return {
                 "ok": False,
                 "server_url": "",
-                "message": "Tailscale is not installed, not signed in, or not on PATH. Install/sign in to Tailscale on the PC first.",
+                "message": "Tailscale is not installed, not signed in, or not currently connected. v28 checks both PATH and the standard Windows installation folder.",
             }
         try:
-            result = subprocess.run(
-                ["tailscale", "serve", "--bg", f"localhost:{port}"],
-                capture_output=True, text=True, timeout=20, creationflags=CREATE_NO_WINDOW,
-            )
+            # The short port form is the same form that proved reliable on the
+            # user's Windows/Tailscale install and proxies to localhost only.
+            result = run_tailscale(["serve", "--bg", str(port)], timeout=20)
             output = (result.stdout or "") + (result.stderr or "")
             output = output.strip()
             if result.returncode == 0:
@@ -152,19 +165,63 @@ class CompanionHub:
                 return {
                     "ok": True,
                     "server_url": url,
-                    "message": "Private phone transport is ready. Tailscale Serve is tailnet-only; JARVIS did not enable Funnel/public access.",
+                    "tailscale_ipv4": fallback_ip,
+                    "message": "Private phone transport is ready. The Android app must keep the HTTPS *.ts.net URL; V28 can use the PC Tailscale IPv4 only as a DNS fallback.",
                     "detail": output[-1200:],
                 }
             return {
                 "ok": False,
                 "server_url": url,
+                "tailscale_ipv4": fallback_ip,
                 "message": "Tailscale Serve could not be configured automatically. Open Tailscale once and approve HTTPS/Serve if prompted, then try again.",
                 "detail": output[-1200:],
             }
         except FileNotFoundError:
-            return {"ok": False, "server_url": "", "message": "Tailscale CLI was not found on this PC."}
+            return {"ok": False, "server_url": "", "message": "Tailscale CLI was not found on this PC. v28 also checked the standard Program Files location."}
         except Exception as exc:
             return {"ok": False, "server_url": url, "message": f"Could not prepare the private phone link: {exc}"}
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Return actionable phone-link diagnostics without exposing private keys."""
+        port = int(getattr(self.config, "phone_bridge_port", 8766))
+        exe = tailscale_executable()
+        identity = self.tailscale_identity()
+        url = identity.get("server_url", "")
+        fallback_ip = identity.get("tailscale_ipv4", "")
+        local_ok = False
+        local_detail = "Phone bridge did not answer."
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/phone/health", timeout=2.5) as response:
+                raw = json.loads(response.read().decode("utf-8", errors="replace"))
+                local_ok = bool(raw.get("ok")) if isinstance(raw, dict) else False
+                local_detail = "Local phone bridge is healthy." if local_ok else "Local phone bridge returned an unexpected response."
+        except Exception as exc:
+            local_detail = f"Local phone bridge unavailable: {exc}"
+
+        serve_ok = False
+        serve_detail = "Tailscale Serve status unavailable."
+        if exe:
+            try:
+                cp = run_tailscale(["serve", "status"], timeout=8)
+                serve_text = ((cp.stdout or "") + (cp.stderr or "")).strip()
+                serve_ok = cp.returncode == 0 and str(port) in serve_text and bool(url)
+                serve_detail = serve_text[-1400:] or ("Serve route is configured." if serve_ok else "No Serve route was reported.")
+            except Exception as exc:
+                serve_detail = f"Could not read Tailscale Serve status: {exc}"
+
+        return {
+            "ok": bool(local_ok and bool(url) and serve_ok),
+            "tailscale_cli": bool(exe),
+            "tailscale_path": exe or "",
+            "server_url": url,
+            "tailscale_ipv4": fallback_ip,
+            "local_bridge_ok": local_ok,
+            "local_bridge_detail": local_detail,
+            "serve_ok": serve_ok,
+            "serve_detail": serve_detail,
+            "paired": bool(self.store.all()),
+            "connected": bool(self.first_connected_device()),
+        }
 
     def begin_pairing(self) -> dict[str, Any]:
         with self._lock:
@@ -173,10 +230,12 @@ class CompanionHub:
             self._pair_expires = time.time() + minutes * 60
             self._pair_used = False
             expires = _utcnow() + timedelta(minutes=minutes)
+            identity = self.tailscale_identity()
             payload = {
                 "code": self._pair_code,
                 "expires_at": expires.isoformat(),
-                "server_url": self.tailscale_url(),
+                "server_url": identity.get("server_url", ""),
+                "tailscale_ipv4": identity.get("tailscale_ipv4", ""),
                 "minutes": minutes,
             }
         self.status_callback(self.status())
@@ -334,13 +393,16 @@ class CompanionHub:
                 "connected": bool(last and now - last < 70),
                 "last_seen_seconds": None if not last else round(now - last, 1),
             })
+        identity = self.tailscale_identity()
         return {
             "enabled": bool(getattr(self.config, "phone_bridge_enabled", True)),
             "paired": bool(rows),
             "connected": any(row["connected"] for row in rows),
             "devices": rows,
-            "server_url": self.tailscale_url(),
-            "transport": "Tailscale Serve HTTPS",
+            "server_url": identity.get("server_url", ""),
+            "tailscale_ipv4": identity.get("tailscale_ipv4", ""),
+            "dns_fallback_enabled": bool(getattr(self.config, "phone_dns_fallback_enabled", True)),
+            "transport": "Tailscale Serve HTTPS + V28 DNS fallback",
             "security": "ECDSA P-256 device identity + replay protection",
         }
 
