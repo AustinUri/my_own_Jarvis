@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Continue"
 $env:PYTHONUTF8 = "1"
 Set-Location (Split-Path -Parent $PSScriptRoot)
-Write-Host "== JARVIS v28 doctor ==" -ForegroundColor Cyan
+Write-Host "== JARVIS v29.1 doctor ==" -ForegroundColor Cyan
 
 $py = Join-Path (Get-Location) ".venv\Scripts\python.exe"
 if (Test-Path $py) { Write-Host "[OK] .venv exists" -ForegroundColor Green; & $py --version } else { Write-Host "[FAIL] .venv missing. Run .\scripts\setup_windows.ps1" -ForegroundColor Red }
@@ -12,8 +12,8 @@ try {
     $ids = @($models.data | ForEach-Object { $_.id })
     Write-Host "[OK] LM Studio API reachable" -ForegroundColor Green
     Write-Host ("     Loaded model(s): " + ($ids -join ", "))
-    if ($ids -notcontains "jarvis-qwen") { Write-Host "[WARN] jarvis-qwen is not loaded; v28 can try to load it automatically." -ForegroundColor Yellow }
-} catch { Write-Host "[WARN] LM Studio is offline; v28 will try to start it automatically." -ForegroundColor Yellow }
+    if ($ids -notcontains "jarvis-qwen") { Write-Host "[WARN] jarvis-qwen is not loaded; v29 can try to load it automatically." -ForegroundColor Yellow }
+} catch { Write-Host "[WARN] LM Studio is offline; v29 will try to start it automatically." -ForegroundColor Yellow }
 
 try {
     $search = Invoke-RestMethod -UseBasicParsing -Uri "http://localhost:8888/search?q=Formula%201&format=json&engines=reuters" -TimeoutSec 10
@@ -21,9 +21,9 @@ try {
     if ($count -gt 0) {
         Write-Host "[OK] SearXNG reachable and returned $count useful test result(s)" -ForegroundColor Green
     } else {
-        Write-Host "[WARN] SearXNG API answered but returned zero test results. v28 can fall back to direct Wikipedia/Google News RSS for supported research/news queries." -ForegroundColor Yellow
+        Write-Host "[WARN] SearXNG API answered but returned zero test results. v29 can fall back to direct Wikipedia/Google News RSS for supported research/news queries." -ForegroundColor Yellow
     }
-} catch { Write-Host "[WARN] SearXNG is offline; v28 will try to start Docker/SearXNG automatically." -ForegroundColor Yellow }
+} catch { Write-Host "[WARN] SearXNG is offline; v29 will try to start Docker/SearXNG automatically." -ForegroundColor Yellow }
 
 try {
     $rss = Invoke-WebRequest -UseBasicParsing -Uri "https://news.google.com/rss/search?q=Formula%201&hl=en-US&gl=US&ceid=US:en" -TimeoutSec 8
@@ -39,7 +39,7 @@ $cal = Join-Path $env:APPDATA "Jarvis\credentials\google_calendar_client.json"
 if (Test-Path $cal) { Write-Host "[OK] Google Calendar OAuth client file found" -ForegroundColor Green } else { Write-Host "[INFO] Google Calendar backup not configured: $cal" -ForegroundColor Cyan }
 
 $runKey = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "JarvisLocalAssistant" -ErrorAction SilentlyContinue
-if ($runKey) { Write-Host "[OK] JARVIS background autostart registered" -ForegroundColor Green } else { Write-Host "[INFO] JARVIS autostart is not registered for this folder. During v28 testing that is expected; after approval run .\scripts\enable_autostart.ps1" -ForegroundColor Yellow }
+if ($runKey) { Write-Host "[OK] JARVIS background autostart registered" -ForegroundColor Green } else { Write-Host "[INFO] JARVIS autostart is not registered for this folder. During v29 testing that is expected; after approval run .\scripts\enable_autostart.ps1" -ForegroundColor Yellow }
 
 $tsExe = (Get-Command tailscale -ErrorAction SilentlyContinue).Source
 if (-not $tsExe) {
@@ -54,6 +54,6 @@ if ($tsExe) {
     Write-Host "[INFO] Tailscale not installed. Only needed for remote phone access." -ForegroundColor Cyan
 }
 
-if (Test-Path ".\android_companion\app\src\main\AndroidManifest.xml") { Write-Host "[OK] Android companion v28 source present" -ForegroundColor Green } else { Write-Host "[FAIL] Android companion source missing" -ForegroundColor Red }
-Write-Host "[OK] Agent Mesh registry: 47 specialist identities; expensive LLM parallelism capped by v28 Resource Governor" -ForegroundColor Green
+if (Test-Path ".\android_companion\app\src\main\AndroidManifest.xml") { Write-Host "[OK] Android companion v29 source present" -ForegroundColor Green } else { Write-Host "[FAIL] Android companion source missing" -ForegroundColor Red }
+Write-Host "[OK] Agent Mesh registry: 47 specialist identities; expensive LLM parallelism capped by v29 Resource Governor" -ForegroundColor Green
 Write-Host "Doctor finished."

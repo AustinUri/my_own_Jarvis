@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass
 class AppConfig:
-    config_version: int = 281
+    config_version: int = 290
 
     # AI / agent provider
     ai_provider: str = "LM Studio"
@@ -128,6 +128,17 @@ class AppConfig:
     phone_dns_fallback_enabled: bool = True
     hololab_enabled: bool = True
 
+    # v29 local-first developer + phone-agent foundation. No cloud AI API keys
+    # are required; Coding JARVIS uses an isolated Git clone and the existing
+    # LM Studio provider. Cellular calling is dial/handoff only in v29.1.
+    coding_jarvis_enabled: bool = True
+    coding_mode: str = "assisted"
+    coding_repo_url: str = "https://github.com/AustinUri/my_own_Jarvis.git"
+    phone_contacts_enabled: bool = True
+    phone_calling_enabled: bool = True
+    aperture_enabled: bool = False
+    aperture_base_url: str = ""
+
     # Wake phrases groundwork
     wake_phrases: str = "Hey Jarvis, Jarvis, Wake up Jarvis"
 
@@ -197,6 +208,30 @@ class AppConfig:
                 cfg.language_mode = "English"
             # Normal follow-up input is queued until the spoken reply is complete.
             cfg.interruption_enabled = False
+        if old_version < 283:
+            # v28.3 keeps English-first STT, disables accidental speech interruption,
+            # and marks the Living Neutrino Core generation.
+            cfg.config_version = 283
+            if str(data.get("language_mode") or "Auto") == "Auto":
+                cfg.language_mode = "English"
+            cfg.interruption_enabled = False
+            cfg.speech_finish_sentence_on_interrupt = True
+        if old_version < 285:
+            # v28.5.2 stabilizes Surface navigation/layout and adds the local-first
+            # mechanical-engineering course bridge. No cloud API keys are required.
+            cfg.config_version = 285
+            cfg.interruption_enabled = False
+            cfg.speech_finish_sentence_on_interrupt = True
+        if old_version < 290:
+            # v29 introduces Coding JARVIS in an isolated dev clone, a richer phone
+            # client and native phone dial/handoff tools. Aperture remains optional
+            # and disabled by default so JARVIS stays keyless/local-first.
+            cfg.config_version = 290
+            cfg.coding_jarvis_enabled = True
+            cfg.coding_mode = str(getattr(cfg, "coding_mode", "assisted") or "assisted")
+            cfg.phone_contacts_enabled = True
+            cfg.phone_calling_enabled = True
+            cfg.aperture_enabled = False
         if not str(cfg.searxng_base_url).strip():
             cfg.searxng_base_url = "http://localhost:8888"
         if not str(cfg.ai_base_url).strip():

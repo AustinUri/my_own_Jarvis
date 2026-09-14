@@ -9,16 +9,27 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
+try:
+    from workspace.integrated_shell import JarvisIntegratedShell
+except Exception:
+    JarvisIntegratedShell = None
+
 
 class WorkspaceTray:
-    def __init__(self, app: QApplication, orchestrator, url: str, quit_callback, service_manager=None):
+    def __init__(self, app: QApplication, orchestrator, url: str, quit_callback, service_manager=None, surface_controller=None):
         self.app = app
         self.orchestrator = orchestrator
-        self.url = url.rstrip('/') + '/?build=28.1'
+        self.url = url.rstrip('/') + '/?build=29.1'
         self.quit_callback = quit_callback
         self.service_manager = service_manager
+        self.workspace_window = None
+        if JarvisIntegratedShell is not None:
+            try:
+                self.workspace_window = JarvisIntegratedShell(self.url, build='29.1', surface_controller=surface_controller)
+            except Exception:
+                self.workspace_window = None
         self.icon = QSystemTrayIcon(self._make_icon(), app)
-        self.icon.setToolTip('JARVIS v28.1 — background runtime active')
+        self.icon.setToolTip('JARVIS v29.1 — background runtime active')
         self.menu = QMenu()
 
         open_action = QAction('Open JARVIS Control Center', self.menu)
@@ -56,6 +67,14 @@ class WorkspaceTray:
             self.open_workspace()
 
     def open_workspace(self) -> None:
+        # Preferred V29 path: the Control Center itself is a native Qt
+        # Chromium shell, allowing Surface Dock pages to remain inside the
+        # same JARVIS window even when a site rejects iframe embedding.
+        if self.workspace_window is not None:
+            self.workspace_window.open_workspace()
+            return
+
+        # Compatibility fallback only when Qt WebEngine cannot initialize.
         candidates = [
             Path(r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'),
             Path(r'C:\Program Files\Microsoft\Edge\Application\msedge.exe'),

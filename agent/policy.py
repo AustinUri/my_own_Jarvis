@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 
 EXPLICIT_ACTION_RE = re.compile(
-    r"\b(open|launch|run|start|close|quit|kill|show|hide|switch|bring\s+up|bring|pull\s+up|dock|embed|navigate|go\s+to|lock|shutdown|turn\s+off|create|write|save|search\s+for|find)\b"
+    r"\b(open|launch|run|start|close|quit|kill|show|hide|switch|bring\s+up|bring|pull\s+up|dock|embed|navigate|go\s+to|lock|shutdown|turn\s+off|create|write|save|search\s+for|find|call|dial|phone|fix|change|modify|apply|commit)\b"
     r"|(?:פתח|תפתח|תפעיל|תריץ|סגור|תסגור|תציג|תראה|תביא|נעל|כבה|כתוב|תרשום|שמור|חפש|מצא)",
     re.IGNORECASE,
 )
@@ -31,6 +31,10 @@ UI_MUTATING_TOOLS = {
     "ui_open_surface",
     "calendar_connect",
     "calendar_create_event",
+    "phone_call_contact",
+    "phone_call_number",
+    "coding_apply_patch",
+    "coding_commit",
 }
 
 PRIVATE_WEB_BLOCK_TOOLS = {"answer_web_question", "search_web"}

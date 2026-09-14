@@ -113,7 +113,7 @@ class CompanionHub:
         """Return the PC's private Tailscale HTTPS name and IPv4 address.
 
         The Android companion keeps the HTTPS *.ts.net URL for TLS identity, while
-        V28 may use the 100.x address only as a DNS-resolution fallback.
+        V29 may use the 100.x address only as a DNS-resolution fallback.
         """
         try:
             result = run_tailscale(["status", "--json"], timeout=6)
@@ -151,7 +151,7 @@ class CompanionHub:
             return {
                 "ok": False,
                 "server_url": "",
-                "message": "Tailscale is not installed, not signed in, or not currently connected. v28 checks both PATH and the standard Windows installation folder.",
+                "message": "Tailscale is not installed, not signed in, or not currently connected. v29 checks both PATH and the standard Windows installation folder.",
             }
         try:
             # The short port form is the same form that proved reliable on the
@@ -177,7 +177,7 @@ class CompanionHub:
                 "detail": output[-1200:],
             }
         except FileNotFoundError:
-            return {"ok": False, "server_url": "", "message": "Tailscale CLI was not found on this PC. v28 also checked the standard Program Files location."}
+            return {"ok": False, "server_url": "", "message": "Tailscale CLI was not found on this PC. v29 also checked the standard Program Files location."}
         except Exception as exc:
             return {"ok": False, "server_url": url, "message": f"Could not prepare the private phone link: {exc}"}
 

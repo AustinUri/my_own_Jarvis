@@ -15,3 +15,5 @@ google-auth-httplib2>=0.2
 google-auth-oauthlib>=1.2
 # Optional local voice engine:
 # piper-tts
+
+# V29 Surface Dock uses Qt WebEngine directly; no CDP screenshot-stream dependency.

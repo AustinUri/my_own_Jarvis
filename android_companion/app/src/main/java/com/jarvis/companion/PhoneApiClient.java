@@ -105,7 +105,7 @@ public final class PhoneApiClient {
                 throw new IllegalArgumentException();
             }
         } catch (Exception ex) {
-            throw new IllegalArgumentException("Use the HTTPS *.ts.net address shown by JARVIS. V28 keeps that hostname for TLS security.");
+            throw new IllegalArgumentException("Use the HTTPS *.ts.net address shown by JARVIS. V29 keeps that hostname for TLS security.");
         }
     }
 

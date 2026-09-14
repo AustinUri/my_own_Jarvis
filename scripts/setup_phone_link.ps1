@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-Write-Host "JARVIS v28 secure phone link setup" -ForegroundColor Cyan
+Write-Host "JARVIS v29.1 secure phone link setup" -ForegroundColor Cyan
 
 $tsExe = (Get-Command tailscale -ErrorAction SilentlyContinue).Source
 if (-not $tsExe) {

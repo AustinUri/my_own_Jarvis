@@ -85,9 +85,23 @@ public final class JarvisForegroundService extends Service {
                 out.put("ok", true);
                 out.put("battery_percent", pct);
                 out.put("charging", charging);
+            } else if ("contact_search".equals(command)) {
+                String query = args == null ? "" : args.optString("query", "");
+                out.put("ok", true);
+                out.put("contacts", ContactsBridge.search(this, query));
+            } else if ("call_log_list".equals(command)) {
+                int limit = args == null ? 30 : args.optInt("limit", 30);
+                out.put("ok", true);
+                out.put("calls", CallLogBridge.recent(this, limit));
+                out.put("full_history", CallLogBridge.hasFullAccess(this));
+                out.put("history_source", CallLogBridge.hasFullAccess(this) ? "android_call_log" : "jarvis_calls_only");
+            } else if ("call_number".equals(command)) {
+                String number = args == null ? "" : args.optString("number", "");
+                String name = args == null ? "" : args.optString("name", "");
+                return ContactsBridge.call(this, number, name);
             } else {
                 out.put("ok", false);
-                out.put("error", "Unsupported command. This v28 companion deliberately exposes only approved capabilities.");
+                out.put("error", "Unsupported command. This v29.1 companion exposes only approved capabilities.");
             }
         } catch (Exception ex) {
             try {

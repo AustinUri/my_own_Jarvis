@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,11 +16,13 @@ from tools.notes import create_note
 from tools.open_app import open_app
 from tools.search_files import search_files
 from tools.system_tools import close_app, get_system_status, lock_computer
-from tools.web_tools import WebAnswer, answer_web_question, open_website, search_web
+from tools.web_tools import WebAnswer, answer_web_question, open_website, search_web, KNOWN_SITES
 from services.weather import WeatherService
 from services.google_calendar import GoogleCalendarService
 from services.f1_learning import F1LearningService
+from services.mech_learning import MechanicalEngineeringLearningService
 from services.daily_briefing import DailyBriefingService
+from services.coding_jarvis import CodingJarvisService
 
 
 class ToolRegistry:
@@ -40,7 +44,12 @@ class ToolRegistry:
         self.google_calendar_service = GoogleCalendarService(config)
         self.calendar_service = self.google_calendar_service  # backward-compatible alias for UI code
         self.f1_learning_service = F1LearningService()
+        self.engineering_learning_service = MechanicalEngineeringLearningService()
         self.daily_briefing_service = DailyBriefingService(config)
+        self.coding_service = CodingJarvisService(
+            repo_url=str(getattr(config, "coding_repo_url", "https://github.com/AustinUri/my_own_Jarvis.git")),
+            mode=str(getattr(config, "coding_mode", "assisted")),
+        )
         self.daily_briefing_service.set_calendar_provider(self.calendar_status_data, self.list_calendar_events)
 
     def set_ui_event_sink(self, sink: Callable[[str, dict[str, Any]], None] | None) -> None:
@@ -96,8 +105,8 @@ class ToolRegistry:
         return [
             self._tool("open_app", "Open an installed desktop application. Use only when the user explicitly asks to open/run/launch an app.", {"app": self._string("Application name such as chrome, spotify, notepad, calculator, explorer, edge, discord, vscode.")}, ["app"]),
             self._tool("close_app", "Close a desktop application. Use only when explicitly requested.", {"app": self._string("Application name to close.")}, ["app"]),
-            self._tool("open_website", "Open a website in the default browser. The site may be a known name, a domain such as chess.com, or an http/https URL. Use only when explicitly asked to open/show/navigate to it.", {"site": self._string("Website name, domain, or URL.")}, ["site"]),
-            self._tool("search_web", "Open a browser search page for a query. This changes the user's UI, so use only when the user explicitly asks to search/open search results.", {"query": self._string("Search query.")}, ["query"]),
+            self._tool("open_website", "Open a website inside the JARVIS Surface Dock by default. The site may be a known name, a domain such as chess.com, or an http/https URL. Use only when explicitly asked to open/show/navigate to it. Do not open a separate external browser unless the user explicitly asks for an external/default browser.", {"site": self._string("Website name, domain, or URL.")}, ["site"]),
+            self._tool("search_web", "Open a Google search inside the JARVIS Surface Dock. Use only when the user explicitly asks to search/open search results.", {"query": self._string("Search query.")}, ["query"]),
             self._tool("answer_web_question", "Research a public factual/current question using Jarvis's local SearXNG/Wikipedia web pipeline. It supports deep multi-source list/history/range research (for example all finals since a given year), not just single facts. Use this for facts that may require the internet. Never use it for the user's private schedule, inbox, files, reminders, or personal data.", {"query": self._string("The complete factual/research question, preserving requested years, ranges, and qualifiers.")}, ["query"]),
             self._tool("get_weather", "Get current weather and a short forecast for the user's configured location or another named location. Prefer this over generic web search for weather.", {"location": self._string("Optional city/location name. Leave empty to use the configured home weather location.")}, []),
             self._tool("calendar_status", "Check the preferred calendar source. JARVIS uses the native phone calendar when the trusted phone companion is connected, with Google Calendar as an optional backup.", {}, []),
@@ -108,7 +117,23 @@ class ToolRegistry:
             self._tool("phone_status", "Check whether the trusted JARVIS phone companion is paired and currently connected. This does not access phone content.", {}, []),
             self._tool("phone_device_info", "Read basic non-sensitive device information from the paired phone, such as manufacturer, model and Android version.", {}, []),
             self._tool("phone_battery_status", "Read the paired phone battery percentage and whether it is charging.", {}, []),
+            self._tool("phone_call_history", "Read recent cellular call-history metadata from the paired Android phone when Android grants call-log access. Returns contact/name, normalized number, direction, time and duration; it does not imply that call audio was recorded.", {"limit": {"type":"integer","description":"Number of recent calls, normally 10-50."}}, []),
+            self._tool("phone_find_contact", "Search the paired Android phone contacts by name. Duplicate raw-contact rows and equivalent Israeli +972/05 numbers are normalized before results are returned. Requires contacts permission on the phone.", {"query": self._string("Contact name to search for.")}, ["query"]),
+            self._tool("phone_call_contact", "Place a normal cellular call from the paired Android phone to a named contact. The tool performs contact lookup and duplicate-number cleanup itself; use it directly for explicit requests such as 'call Mum'. If several genuinely different numbers remain it returns them for clarification. This is dial/handoff mode; JARVIS starts the call but does not inject AI audio into the SIM call.", {"query": self._string("Contact name to call.")}, ["query"]),
+            self._tool("phone_call_number", "Place a normal cellular call from the paired Android phone to an explicit phone number. Use only when the user explicitly asks to call/dial that number. Emergency numbers are blocked.", {"number": self._string("Phone number to call.")}, ["number"]),
+            self._tool("call_agent_prepare", "Prepare a transparent JARVIS call-agent handoff plan for a named person and message. This does not pretend to inject AI speech into a SIM call; it returns the disclosure/message and the next dial step.", {"recipient": self._string("Person/contact to call."), "message": self._string("What JARVIS should communicate or remind the user to say.")}, ["recipient","message"]),
+            self._tool("coding_status", "Check Coding JARVIS development workspace status. Coding JARVIS uses a separate Git clone and never edits the running stable JARVIS copy.", {}, []),
+            self._tool("coding_prepare_workspace", "Prepare or refresh the isolated Coding JARVIS Git development workspace. This may clone/pull the user's JARVIS repository but never edits the running stable copy.", {"refresh": {"type":"boolean","description":"Fetch/pull updates when the dev workspace is clean."}}, []),
+            self._tool("coding_search", "Search the isolated JARVIS development codebase for a symbol, error text, file, or phrase.", {"query": self._string("Code/file/symbol/error search phrase.")}, ["query"]),
+            self._tool("coding_read_file", "Read a text/source file from the isolated Coding JARVIS development workspace.", {"path": self._string("Repository-relative file path."), "start_line": {"type":"integer"}, "max_lines": {"type":"integer"}}, ["path"]),
+            self._tool("coding_apply_patch", "Apply a unified-diff patch only inside the isolated Coding JARVIS development branch. Use only when the user explicitly asks Coding JARVIS to fix/change code.", {"patch": self._string("Unified diff patch to apply in the dev workspace.")}, ["patch"]),
+            self._tool("coding_diff", "Show the current uncommitted diff from the isolated Coding JARVIS development branch.", {}, []),
+            self._tool("coding_run_checks", "Run safe local syntax/diff checks against the isolated Coding JARVIS development workspace.", {}, []),
+            self._tool("coding_commit", "Commit tested Coding JARVIS development-branch changes locally. This never pushes or promotes them to the stable running build.", {"message": self._string("Git commit message.")}, ["message"]),
             self._tool("f1_next_lesson", "Get the next Formula 1 learning topic from the user's persistent learning progression. Use when the user asks Jarvis to teach them something new about F1.", {}, []),
+            self._tool("engineering_course_status", "Check whether the user's home-mech-engin mechanical-engineering course repository is available locally and report learning progress. This is local/keyless.", {}, []),
+            self._tool("engineering_course_sync", "Clone or update the user's public home-mech-engin course repository with Git. No AI API key is required. Use when the user asks to sync/update the engineering course or when the course is not available.", {}, []),
+            self._tool("engineering_lesson", "Teach or quiz the user from their home-mech-engin mechanical-engineering course. The tool returns source context from the local repository for the local JARVIS model to explain. Modes: teach, next, quiz, review.", {"topic": self._string("Optional engineering topic; leave blank for the next lesson."), "mode": self._string("teach, next, quiz, or review")}, []),
             self._tool("analyze_camera", "Inspect the latest frame from the explicitly enabled JARVIS Camera widget. Use only when the user asks what you can see, asks whether you can see them/an object, or asks you to inspect the camera.", {"prompt": self._string("What to inspect or describe in the camera frame.")}, ["prompt"]),
             self._tool("open_folder", "Open a common local folder when explicitly requested.", {"folder": self._string("One of desktop, downloads, documents, pictures, music, videos.")}, ["folder"]),
             self._tool("tell_time", "Get the current local time from the PC.", {}, []),
@@ -119,7 +144,7 @@ class ToolRegistry:
             self._tool("search_files", "Search Jarvis's project/local search scope for matching files.", {"query": self._string("Filename or search phrase.")}, ["query"]),
             self._tool("lock_computer", "Lock the Windows computer. Use only on an explicit request.", {}, []),
             self._tool("shutdown_request", "Request a PC shutdown. This tool does not shut down immediately; it returns that confirmation is required.", {}, []),
-            self._tool("ui_show_panel", "Show a JARVIS workspace panel when the user explicitly asks to see it. Valid panel IDs include orb, conversation, briefing, weather, calendar, sports, learning, services, phone, activity, sources, system, context, camera, agentmesh, surface, settings.", {"panel": self._string("Workspace panel ID.")}, ["panel"]),
+            self._tool("ui_show_panel", "Show a JARVIS workspace panel when the user explicitly asks to see it. Valid panel IDs include orb, conversation, briefing, weather, calendar, sports, learning, services, phone, calls, activity, sources, system, context, camera, agentmesh, engineering, coding, settings. Surface is a native pane controlled through ui_open_surface, not a widget.", {"panel": self._string("Workspace panel ID.")}, ["panel"]),
             self._tool("ui_hide_panel", "Hide a JARVIS workspace panel when the user explicitly asks to hide/close that panel.", {"panel": self._string("Workspace panel ID.")}, ["panel"]),
             self._tool("ui_switch_workspace", "Switch the JARVIS workspace layout when the user explicitly asks. Use the exact workspace/mode name requested by the user; custom saved modes are allowed.", {"workspace": self._string("Workspace name.")}, ["workspace"]),
             self._tool("ui_create_workspace", "Create a persistent custom JARVIS mode/workspace by cloning the current layout. Use only when the user explicitly asks to create/save a new mode.", {"workspace": self._string("Name for the new mode/workspace.")}, ["workspace"]),
@@ -153,9 +178,20 @@ class ToolRegistry:
         if action.name == "close_app":
             return close_app(action.args.get("app", ""))
         if action.name == "open_website":
-            return open_website(action.args.get("site", ""))
+            site = str(action.args.get("site", "") or "").strip()
+            key = site.lower()
+            target = KNOWN_SITES.get(key, site)
+            if self._ui_event_sink is not None:
+                self._ui_event_sink("ui_open_surface", {"target": target, "title": key.title() if key in KNOWN_SITES else ""})
+                return f"Opened {target} inside the JARVIS Surface Dock."
+            return open_website(site)
         if action.name == "search_web":
-            return search_web(action.args.get("query", ""))
+            query = str(action.args.get("query", "") or "").strip()
+            if self._ui_event_sink is not None and query:
+                target = "https://www.google.com/search?q=" + urllib.parse.quote_plus(query)
+                self._ui_event_sink("ui_open_surface", {"target": target, "title": "Search"})
+                return f"Opened a web search for '{query}' inside the JARVIS Surface Dock."
+            return search_web(query)
         if action.name == "answer_web_question":
             return answer_web_question(action.args.get("query", ""), self.config)
         if action.name == "get_weather":
@@ -186,8 +222,81 @@ class ToolRegistry:
             if self._phone_hub is None:
                 return {"ok": False, "error": "Phone bridge is not running."}
             return self._phone_hub.request("battery_status", {})
+        if action.name == "phone_call_history":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            limit = max(1, min(100, int(action.args.get("limit") or 30)))
+            return self._phone_hub.request("call_log_list", {"limit": limit})
+        if action.name == "phone_find_contact":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            return self._phone_hub.request("contact_search", {"query": str(action.args.get("query") or "")})
+        if action.name == "phone_call_contact":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            query = str(action.args.get("query") or "").strip()
+            query = re.sub(r"^(?:my|the)\s+", "", query, flags=re.IGNORECASE).strip()
+            found = self._phone_hub.request("contact_search", {"query": query})
+            contacts = (found.get("contacts") or []) if isinstance(found, dict) else []
+            if not contacts:
+                return {"ok": False, "error": f"No phone contact matched '{query}'.", "contacts": []}
+            if len(contacts) > 1:
+                # Android may legitimately expose several different numbers for one
+                # person. Prefer a single mobile row; otherwise ask instead of guessing.
+                mobiles = [c for c in contacts if int(c.get("type") or -1) == 2]
+                if len(mobiles) == 1:
+                    contacts = mobiles
+            if len(contacts) != 1:
+                return {"ok": False, "error": "That name still resolves to more than one distinct phone number. Please choose which one to call.", "contacts": contacts}
+            row = contacts[0]
+            return self._phone_hub.request("call_number", {"number": str(row.get("number") or ""), "name": str(row.get("name") or query)})
+        if action.name == "phone_call_number":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            return self._phone_hub.request("call_number", {"number": str(action.args.get("number") or "")})
+        if action.name == "call_agent_prepare":
+            recipient = str(action.args.get("recipient") or "").strip()
+            message = str(action.args.get("message") or "").strip()
+            return {
+                "ok": True,
+                "mode": "cellular-handoff",
+                "recipient": recipient,
+                "disclosure": f"Hello, this is JARVIS calling on behalf of my user.",
+                "message": message,
+                "next_step": f"Use phone_call_contact for {recipient} after the user has explicitly asked to place the call.",
+                "limitation": "V29.1 does not inject synthesized JARVIS audio into ordinary SIM-call uplink/downlink audio.",
+            }
+        if action.name == "coding_status":
+            return self.coding_service.status()
+        if action.name == "coding_prepare_workspace":
+            return self.coding_service.ensure_workspace(refresh=bool(action.args.get("refresh", False)))
+        if action.name == "coding_search":
+            return self.coding_service.search(str(action.args.get("query") or ""))
+        if action.name == "coding_read_file":
+            return self.coding_service.read_file(
+                str(action.args.get("path") or ""),
+                start_line=int(action.args.get("start_line") or 1),
+                max_lines=int(action.args.get("max_lines") or 220),
+            )
+        if action.name == "coding_apply_patch":
+            return self.coding_service.apply_patch(str(action.args.get("patch") or ""))
+        if action.name == "coding_diff":
+            return self.coding_service.diff()
+        if action.name == "coding_run_checks":
+            return self.coding_service.run_checks()
+        if action.name == "coding_commit":
+            return self.coding_service.commit(str(action.args.get("message") or ""))
         if action.name == "f1_next_lesson":
             return self.f1_learning_service.next_lesson()
+        if action.name == "engineering_course_status":
+            return self.engineering_learning_service.status()
+        if action.name == "engineering_course_sync":
+            return self.engineering_learning_service.sync()
+        if action.name == "engineering_lesson":
+            return self.engineering_learning_service.lesson(
+                topic=str(action.args.get("topic") or ""),
+                mode=str(action.args.get("mode") or "teach"),
+            )
         if action.name == "analyze_camera":
             if self._camera_frame_supplier is None or self._vision_analyzer is None:
                 return "Camera vision is not connected to the JARVIS runtime."

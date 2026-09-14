@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import time
@@ -13,10 +14,16 @@ from phone.bridge import CompanionHub
 
 
 class PhoneBridgeServer:
-    def __init__(self, hub: CompanionHub, ask_callback: Callable[[str, str], dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        hub: CompanionHub,
+        ask_callback: Callable[[str, str], dict[str, Any]] | None = None,
+        voice_callback: Callable[[bytes, str], dict[str, Any]] | None = None,
+    ) -> None:
         self.hub = hub
         self.ask_callback = ask_callback
-        self.app = FastAPI(title="JARVIS Phone Bridge", version="28")
+        self.voice_callback = voice_callback
+        self.app = FastAPI(title="JARVIS Phone Bridge", version="29.1")
         self._pair_attempts: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
         self._configure_routes()
@@ -50,7 +57,7 @@ class PhoneBridgeServer:
         @app.get("/api/phone/health")
         async def health() -> dict[str, Any]:
             # Deliberately contains no personal data and does not expose pairing state.
-            return {"ok": True, "version": 28, "build": "28.2", "service": "jarvis-phone-bridge"}
+            return {"ok": True, "version": 29, "build": "29.1", "service": "jarvis-phone-bridge"}
 
         @app.post("/api/phone/pair")
         async def pair(request: Request) -> JSONResponse:
@@ -87,6 +94,29 @@ class PhoneBridgeServer:
             if len(text) > 6000:
                 raise HTTPException(status_code=400, detail="Question is too long.")
             result = await __import__("asyncio").to_thread(self.ask_callback, text, device)
+            return JSONResponse(result)
+
+        @app.post("/api/phone/voice")
+        async def voice(request: Request) -> JSONResponse:
+            body = await request.body()
+            device = await self._auth(request, body)
+            if self.voice_callback is None:
+                raise HTTPException(status_code=503, detail="Local phone voice transcription is not connected.")
+            if len(body) > 8_000_000:
+                raise HTTPException(status_code=413, detail="Voice request is too large.")
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                encoded = str(payload.get("audio_b64") or "")
+                if not encoded:
+                    raise ValueError("No audio was supplied.")
+                audio = base64.b64decode(encoded.encode("ascii"), validate=True)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid voice payload: {exc}") from exc
+            if len(audio) < 1000:
+                raise HTTPException(status_code=400, detail="Voice recording is empty or too short.")
+            if len(audio) > 5_500_000:
+                raise HTTPException(status_code=413, detail="Voice recording is too long.")
+            result = await __import__("asyncio").to_thread(self.voice_callback, audio, device)
             return JSONResponse(result)
 
         @app.post("/api/phone/poll")

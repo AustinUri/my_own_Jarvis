@@ -1,1 +1,1 @@
-"""Secure phone companion bridge for JARVIS v28."""
+"""Secure phone companion bridge for JARVIS v29."""

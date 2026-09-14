@@ -52,11 +52,26 @@
     "title": "Phone Link",
     "category": "personal",
     "permissions": [
-      "native_calendar_read"
+      "native_calendar_read",
+      "contacts",
+      "calling",
+      "microphone"
     ],
     "default": {
       "w": 4,
       "h": 7
+    }
+  },
+  {
+    "id": "calls",
+    "title": "Call History",
+    "category": "personal",
+    "permissions": [
+      "call_log_optional"
+    ],
+    "default": {
+      "w": 5,
+      "h": 9
     }
   },
   {
@@ -153,12 +168,21 @@
     }
   },
   {
-    "id": "surface",
-    "title": "Surface Dock",
-    "category": "ui",
+    "id": "engineering",
+    "title": "Engineering Tutor",
+    "category": "learning",
     "default": {
       "w": 5,
       "h": 8
+    }
+  },
+  {
+    "id": "coding",
+    "title": "Coding JARVIS",
+    "category": "engineering",
+    "default": {
+      "w": 5,
+      "h": 9
     }
   }
 ]

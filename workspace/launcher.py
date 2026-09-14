@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -24,13 +25,13 @@ from phone.bridge import CompanionHub
 from phone.server import PhoneBridgeServer
 from core.agent_mesh import AgentMesh
 from core.resource_governor import ResourceGovernor
-from workspace.surface_browser import SurfaceBrowser
+from workspace.native_surface import NativeSurfaceController
 
 
 class CommandRouter(QObject):
     incoming = Signal(dict)
 
-    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CompanionHub, agent_mesh: AgentMesh, resource_governor: ResourceGovernor):
+    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CompanionHub, agent_mesh: AgentMesh, resource_governor: ResourceGovernor, surface_controller: NativeSurfaceController):
         super().__init__()
         self.bridge = bridge
         self.camera_state = camera_state
@@ -39,11 +40,19 @@ class CommandRouter(QObject):
         self.phone_hub = phone_hub
         self.agent_mesh = agent_mesh
         self.resource_governor = resource_governor
-        self.surface_browser = SurfaceBrowser()
+        self.surface_controller = surface_controller
         self.incoming.connect(self._dispatch)
 
     def _thread(self, target, name: str) -> None:
         threading.Thread(target=target, name=name, daemon=True).start()
+
+    def shutdown_surface(self) -> None:
+        # The V29 Surface renderer is an isolated QWebEngine sibling owned by the
+        # Control Center shell. There is no screenshot/CDP worker to tear down.
+        try:
+            self.surface_controller.close()
+        except Exception:
+            pass
 
     @Slot(dict)
     def _dispatch(self, message: dict) -> None:
@@ -84,8 +93,21 @@ class CommandRouter(QObject):
                 self.publish('camera_status', self.camera_state.status())
         elif action == 'hololab_test':
             self.publish('hololab_result', run_visual_tests(dict(payload)))
-        elif action == 'surface_open_native':
-            self.publish('surface_status', self.surface_browser.open(str(payload.get('url') or '')))
+        elif action in {'surface_open_native', 'surface_open_integrated'}:
+            url = str(payload.get('url') or '')
+            title = str(payload.get('title') or '')
+            self.surface_controller.open(url, title)
+        elif action == 'surface_close':
+            self.surface_controller.close()
+        elif action == 'surface_back':
+            self.surface_controller.back()
+        elif action == 'surface_forward':
+            self.surface_controller.forward()
+        elif action == 'surface_reload':
+            self.surface_controller.reload()
+        elif action in {'surface_pause','surface_resume','surface_viewport','surface_pointer','surface_text','surface_key'}:
+            # Legacy V28 streamed-surface events are intentionally ignored in V29.
+            pass
         elif action == 'refresh_briefing':
             def run_briefing():
                 self.publish('briefing_status', {'status': 'working'})
@@ -152,6 +174,21 @@ class CommandRouter(QObject):
                 except Exception as exc:
                     self.publish('phone_diagnostics', {"phone_function": "battery_status", "error": str(exc)})
             self._thread(phone_battery, 'jarvis-phone-battery')
+        elif action == 'phone_call_history':
+            def phone_call_history():
+                try:
+                    result = self.phone_hub.request("call_log_list", {"limit": int(payload.get("limit") or 30)})
+                    calls = (result.get("calls") or []) if isinstance(result, dict) else []
+                    self.publish('phone_call_history', {
+                        "ok": True,
+                        "calls": calls,
+                        "count": len(calls),
+                        "full_history": bool(result.get("full_history")) if isinstance(result, dict) else False,
+                        "history_source": str(result.get("history_source") or "unknown") if isinstance(result, dict) else "unknown",
+                    })
+                except Exception as exc:
+                    self.publish('phone_call_history', {"ok": False, "calls": [], "error": str(exc)})
+            self._thread(phone_call_history, 'jarvis-phone-call-history')
         elif action == 'phone_diagnose':
             def diagnose_phone():
                 result = self.phone_hub.diagnostics()
@@ -163,8 +200,33 @@ class CommandRouter(QObject):
             self.publish('phone_pairing', {})
             self.publish('phone_status', self.phone_hub.status())
             self.publish('log', f'Revoked {count} paired phone(s).')
+        elif action == 'coding_status':
+            self.publish('coding_status', self.orchestrator.tools.coding_service.status())
+        elif action == 'coding_prepare':
+            def prepare_coding():
+                self.publish('coding_status', self.orchestrator.tools.coding_service.ensure_workspace(refresh=bool(payload.get('refresh', False))))
+            self._thread(prepare_coding, 'jarvis-coding-prepare')
+        elif action == 'coding_checks':
+            def coding_checks():
+                self.publish('coding_status', self.orchestrator.tools.coding_service.run_checks())
+            self._thread(coding_checks, 'jarvis-coding-checks')
+        elif action == 'coding_diff':
+            def coding_diff():
+                result = self.orchestrator.tools.coding_service.diff(12000)
+                status = self.orchestrator.tools.coding_service.status()
+                status['diff_preview'] = result.get('diff', '') if isinstance(result, dict) else ''
+                status['diff_stat'] = result.get('stat', '') if isinstance(result, dict) else ''
+                self.publish('coding_status', status)
+            self._thread(coding_diff, 'jarvis-coding-diff')
         elif action == 'next_f1_lesson':
             self.publish('f1_lesson', self.orchestrator.tools.f1_learning_service.next_lesson())
+        elif action == 'engineering_status':
+            self.publish('engineering_status', self.orchestrator.tools.engineering_learning_service.status())
+        elif action == 'engineering_sync':
+            def sync_engineering():
+                result = self.orchestrator.tools.engineering_learning_service.sync()
+                self.publish('engineering_status', result)
+            self._thread(sync_engineering, 'jarvis-engineering-sync')
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,14 +252,14 @@ def main(argv: list[str] | None = None) -> int:
         'transcript': '', 'response': '', 'responseLanguage': 'en', 'spoken': '',
         'logs': [], 'activity': [], 'error': '', 'dailyBriefing': orchestrator.tools.daily_briefing_service.cached(),
         'weather': {}, 'calendarStatus': orchestrator.tools.calendar_status_data(), 'calendarEvents': [],
-        'f1Lesson': {}, 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneTransport': {}, 'phoneDiagnostics': {}, 'agentMesh': {}, 'hololabResult': {}, 'surfaceStatus': {},
+        'f1Lesson': {}, 'engineeringStatus': orchestrator.tools.engineering_learning_service.status(), 'codingStatus': orchestrator.tools.coding_service.status(), 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneTransport': {}, 'phoneDiagnostics': {}, 'phoneCallHistory': {'ok': False, 'calls': []}, 'agentMesh': {}, 'hololabResult': {}, 'surfaceStatus': {},
     }
 
     server: WorkspaceServer | None = None
 
     def snapshot() -> dict:
         return {
-            'version': 28, 'build': '28.2',
+            'version': 29, 'build': '29.1',
             'runtime': dict(state),
             'config': asdict(config),
             'aiStatus': state.get('aiStatus', 'Checking AI provider…'),
@@ -207,11 +269,14 @@ def main(argv: list[str] | None = None) -> int:
             'calendarStatus': state.get('calendarStatus') or {},
             'calendarEvents': state.get('calendarEvents') or [],
             'f1Lesson': state.get('f1Lesson') or {},
+            'engineeringStatus': state.get('engineeringStatus') or {},
+            'codingStatus': state.get('codingStatus') or {},
             'serviceStatus': state.get('serviceStatus') or {},
             'phoneStatus': state.get('phoneStatus') or {},
             'phonePairing': state.get('phonePairing') or {},
             'phoneTransport': state.get('phoneTransport') or {},
             'phoneDiagnostics': state.get('phoneDiagnostics') or {},
+            'phoneCallHistory': state.get('phoneCallHistory') or {'ok': False, 'calls': []},
             'agentMesh': state.get('agentMesh') or {},
             'hololabResult': state.get('hololabResult') or {},
             'surfaceStatus': state.get('surfaceStatus') or {},
@@ -224,11 +289,14 @@ def main(argv: list[str] | None = None) -> int:
         elif event_type == 'calendar_status': state['calendarStatus'] = payload
         elif event_type == 'calendar_events': state['calendarEvents'] = payload
         elif event_type == 'f1_lesson': state['f1Lesson'] = payload
+        elif event_type == 'engineering_status': state['engineeringStatus'] = payload
+        elif event_type == 'coding_status': state['codingStatus'] = payload
         elif event_type == 'service_status': state['serviceStatus'] = payload
         elif event_type == 'phone_status': state['phoneStatus'] = payload
         elif event_type == 'phone_pairing': state['phonePairing'] = payload
         elif event_type == 'phone_transport': state['phoneTransport'] = payload
         elif event_type == 'phone_diagnostics': state['phoneDiagnostics'] = payload
+        elif event_type == 'phone_call_history': state['phoneCallHistory'] = payload
         elif event_type == 'agent_mesh': state['agentMesh'] = payload
         elif event_type == 'hololab_result': state['hololabResult'] = payload
         elif event_type == 'surface_status': state['surfaceStatus'] = payload
@@ -249,7 +317,9 @@ def main(argv: list[str] | None = None) -> int:
     state['agentMesh'] = agent_mesh.snapshot(resource=resource_governor.snapshot().to_dict())
 
     bridge = WorkspaceBridge(orchestrator, config, config_path, publish)
-    router = CommandRouter(bridge, camera_state, publish, orchestrator, phone_hub, agent_mesh, resource_governor)
+    surface_controller = NativeSurfaceController(publish=publish)
+    state['surfaceStatus'] = surface_controller.status()
+    router = CommandRouter(bridge, camera_state, publish, orchestrator, phone_hub, agent_mesh, resource_governor, surface_controller)
     profile_store = WorkspaceProfileStore()
 
     briefing_started = threading.Event()
@@ -354,7 +424,36 @@ def main(argv: list[str] | None = None) -> int:
 
     # The companion API never binds to LAN/WAN interfaces. Tailscale Serve may
     # proxy this localhost port over tailnet-only HTTPS after explicit setup.
-    phone_server = PhoneBridgeServer(phone_hub, ask_callback=lambda text, device: orchestrator.process_remote_text(text, source=f'phone:{device}'))
+    def transcribe_phone_voice(audio: bytes, device: str) -> dict:
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
+                tmp.write(audio)
+                temp_path = Path(tmp.name)
+            transcript = orchestrator.whisper.transcribe(str(temp_path), command_mode=True).strip()
+            if not transcript:
+                return {'ok': False, 'error': 'JARVIS could not hear a usable voice command.', 'transcript': ''}
+            result = orchestrator.process_remote_text(transcript, source=f'phone:{device}')
+            if not isinstance(result, dict):
+                result = {'ok': True, 'text': str(result or ''), 'spoken_text': str(result or '')}
+            result = dict(result)
+            result.setdefault('ok', True)
+            result['transcript'] = transcript
+            return result
+        except Exception as exc:
+            return {'ok': False, 'error': f'Local phone voice transcription failed: {exc}', 'transcript': ''}
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    phone_server = PhoneBridgeServer(
+        phone_hub,
+        ask_callback=lambda text, device: orchestrator.process_remote_text(text, source=f'phone:{device}'),
+        voice_callback=transcribe_phone_voice,
+    )
     phone_uvicorn_config = uvicorn.Config(phone_server.app, host='127.0.0.1', port=int(getattr(config, 'phone_bridge_port', 8766)), log_level='warning')
     phone_uvicorn_server = uvicorn.Server(phone_uvicorn_config)
     phone_thread = threading.Thread(target=phone_uvicorn_server.run, name='jarvis-phone-bridge', daemon=True)
@@ -364,6 +463,7 @@ def main(argv: list[str] | None = None) -> int:
     service_manager.start()
 
     def quit_all() -> None:
+        router.shutdown_surface()
         service_manager.stop()
         orchestrator.shutdown()
         config.save(config_path)
@@ -372,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         app.quit()
 
     app.aboutToQuit.connect(orchestrator.shutdown)
-    tray = WorkspaceTray(app, orchestrator, url, quit_all, service_manager=service_manager)
+    tray = WorkspaceTray(app, orchestrator, url, quit_all, service_manager=service_manager, surface_controller=surface_controller)
 
     def check_ai_status() -> None:
         status = orchestrator.ai_provider_status()
@@ -384,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         QTimer.singleShot(900, tray.open_workspace)
 
     exit_code = app.exec()
+    router.shutdown_surface()
     service_manager.stop()
     config.save(config_path)
     uvicorn_server.should_exit = True

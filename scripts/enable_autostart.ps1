@@ -8,4 +8,4 @@ $cmd = '"' + $pythonw + '" "' + $main + '" --background'
 New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Force | Out-Null
 New-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "JarvisLocalAssistant" -PropertyType String -Value $cmd -Force | Out-Null
 & $pythonw -c "from pathlib import Path; from core.config import AppConfig; p=Path('config.json'); c=AppConfig.load(p); c.start_with_windows=True; c.save(p)"
-Write-Host "[OK] Windows autostart now points to JARVIS v28 in this folder." -ForegroundColor Green
+Write-Host "[OK] Windows autostart now points to JARVIS v29.1 in this folder." -ForegroundColor Green
