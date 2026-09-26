@@ -6,7 +6,6 @@ import socket
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
-
 app = FastAPI(
     title="JARVIS Cloud Core",
     version="30.0-alpha"
