@@ -1,8 +1,8 @@
-# JARVIS Android Companion v29.1
+# JARVIS Android Companion v29.2
 
 The companion is the Samsung-side client for private JARVIS access over Tailscale HTTPS.
 
-## v29.1
+## v29.2
 - Remote text chat with the home JARVIS core.
 - `TAP TO TALK` uses the phone microphone directly and sends signed WAV audio to the PC for local Whisper transcription. Google speech recognition is not used.
 - Runtime permission onboarding replaces dedicated permission buttons.

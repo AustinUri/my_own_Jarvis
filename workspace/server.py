@@ -73,7 +73,7 @@ class WorkspaceServer:
         self.on_client_connected = on_client_connected
         self.manager = WorkspaceConnectionManager()
         self.resource_governor = ResourceGovernor(config)
-        self.app = FastAPI(title="JARVIS Workspace API", version="29.1")
+        self.app = FastAPI(title="JARVIS Workspace API", version="29.2")
         self._configure_routes()
 
     def _configure_routes(self) -> None:
@@ -89,7 +89,7 @@ class WorkspaceServer:
 
         @app.get("/api/health")
         async def health() -> dict[str, Any]:
-            return {"ok": True, "version": 29, "build": "29.1"}
+            return {"ok": True, "version": 29, "build": "29.2"}
 
         @app.get("/api/profiles")
         async def profiles() -> JSONResponse:

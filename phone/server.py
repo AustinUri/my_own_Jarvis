@@ -23,7 +23,7 @@ class PhoneBridgeServer:
         self.hub = hub
         self.ask_callback = ask_callback
         self.voice_callback = voice_callback
-        self.app = FastAPI(title="JARVIS Phone Bridge", version="29.1")
+        self.app = FastAPI(title="JARVIS Phone Bridge", version="29.2")
         self._pair_attempts: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
         self._configure_routes()
@@ -57,7 +57,7 @@ class PhoneBridgeServer:
         @app.get("/api/phone/health")
         async def health() -> dict[str, Any]:
             # Deliberately contains no personal data and does not expose pairing state.
-            return {"ok": True, "version": 29, "build": "29.1", "service": "jarvis-phone-bridge"}
+            return {"ok": True, "version": 29, "build": "29.2", "service": "jarvis-phone-bridge"}
 
         @app.post("/api/phone/pair")
         async def pair(request: Request) -> JSONResponse:

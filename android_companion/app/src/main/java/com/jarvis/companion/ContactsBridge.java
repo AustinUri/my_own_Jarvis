@@ -113,7 +113,7 @@ public final class ContactsBridge {
         out.put("number", number);
         out.put("canonical_number", PhoneNumbers.canonical(number));
         out.put("name", name == null ? "" : name);
-        out.put("message", "Call started on the phone. V29.1 hands the live SIM call to the user.");
+        out.put("message", "Call started on the phone. V29.2 hands the live SIM call to the user.");
         return out;
     }
 }

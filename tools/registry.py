@@ -121,6 +121,7 @@ class ToolRegistry:
             self._tool("phone_find_contact", "Search the paired Android phone contacts by name. Duplicate raw-contact rows and equivalent Israeli +972/05 numbers are normalized before results are returned. Requires contacts permission on the phone.", {"query": self._string("Contact name to search for.")}, ["query"]),
             self._tool("phone_call_contact", "Place a normal cellular call from the paired Android phone to a named contact. The tool performs contact lookup and duplicate-number cleanup itself; use it directly for explicit requests such as 'call Mum'. If several genuinely different numbers remain it returns them for clarification. This is dial/handoff mode; JARVIS starts the call but does not inject AI audio into the SIM call.", {"query": self._string("Contact name to call.")}, ["query"]),
             self._tool("phone_call_number", "Place a normal cellular call from the paired Android phone to an explicit phone number. Use only when the user explicitly asks to call/dial that number. Emergency numbers are blocked.", {"number": self._string("Phone number to call.")}, ["number"]),
+            self._tool("phone_whatsapp_contact", "Open WhatsApp on the paired Android phone for a named contact with a message pre-filled. Contact lookup uses the same duplicate-safe +972/05 normalization as calling. V29.2 deliberately stops at compose/review: the user taps Send in WhatsApp, so JARVIS never falsely claims a message was sent.", {"query": self._string("Contact name for the WhatsApp message."), "message": self._string("Message text to prepare in WhatsApp.")}, ["query","message"]),
             self._tool("call_agent_prepare", "Prepare a transparent JARVIS call-agent handoff plan for a named person and message. This does not pretend to inject AI speech into a SIM call; it returns the disclosure/message and the next dial step.", {"recipient": self._string("Person/contact to call."), "message": self._string("What JARVIS should communicate or remind the user to say.")}, ["recipient","message"]),
             self._tool("coding_status", "Check Coding JARVIS development workspace status. Coding JARVIS uses a separate Git clone and never edits the running stable JARVIS copy.", {}, []),
             self._tool("coding_prepare_workspace", "Prepare or refresh the isolated Coding JARVIS Git development workspace. This may clone/pull the user's JARVIS repository but never edits the running stable copy.", {"refresh": {"type":"boolean","description":"Fetch/pull updates when the dev workspace is clean."}}, []),
@@ -183,14 +184,14 @@ class ToolRegistry:
             target = KNOWN_SITES.get(key, site)
             if self._ui_event_sink is not None:
                 self._ui_event_sink("ui_open_surface", {"target": target, "title": key.title() if key in KNOWN_SITES else ""})
-                return f"Opened {target} inside the JARVIS Surface Dock."
+                return f"Opened {target} inside the JARVIS Surface."
             return open_website(site)
         if action.name == "search_web":
             query = str(action.args.get("query", "") or "").strip()
             if self._ui_event_sink is not None and query:
                 target = "https://www.google.com/search?q=" + urllib.parse.quote_plus(query)
                 self._ui_event_sink("ui_open_surface", {"target": target, "title": "Search"})
-                return f"Opened a web search for '{query}' inside the JARVIS Surface Dock."
+                return f"Opened a web search for '{query}' inside the JARVIS Surface."
             return search_web(query)
         if action.name == "answer_web_question":
             return answer_web_question(action.args.get("query", ""), self.config)
@@ -254,6 +255,30 @@ class ToolRegistry:
             if self._phone_hub is None:
                 return {"ok": False, "error": "Phone bridge is not running."}
             return self._phone_hub.request("call_number", {"number": str(action.args.get("number") or "")})
+        if action.name == "phone_whatsapp_contact":
+            if self._phone_hub is None:
+                return {"ok": False, "error": "Phone bridge is not running."}
+            query = str(action.args.get("query") or "").strip()
+            query = re.sub(r"^(?:my|the)\s+", "", query, flags=re.IGNORECASE).strip()
+            message = str(action.args.get("message") or "").strip()
+            if not message:
+                return {"ok": False, "error": "WhatsApp message text is empty."}
+            found = self._phone_hub.request("contact_search", {"query": query})
+            contacts = (found.get("contacts") or []) if isinstance(found, dict) else []
+            if not contacts:
+                return {"ok": False, "error": f"No phone contact matched '{query}'.", "contacts": []}
+            if len(contacts) > 1:
+                mobiles = [c for c in contacts if int(c.get("type") or -1) == 2]
+                if len(mobiles) == 1:
+                    contacts = mobiles
+            if len(contacts) != 1:
+                return {"ok": False, "error": "That name resolves to more than one distinct phone number. Please choose which one to message.", "contacts": contacts}
+            row = contacts[0]
+            return self._phone_hub.request("whatsapp_message", {
+                "number": str(row.get("number") or ""),
+                "name": str(row.get("name") or query),
+                "message": message,
+            })
         if action.name == "call_agent_prepare":
             recipient = str(action.args.get("recipient") or "").strip()
             message = str(action.args.get("message") or "").strip()
@@ -264,7 +289,7 @@ class ToolRegistry:
                 "disclosure": f"Hello, this is JARVIS calling on behalf of my user.",
                 "message": message,
                 "next_step": f"Use phone_call_contact for {recipient} after the user has explicitly asked to place the call.",
-                "limitation": "V29.1 does not inject synthesized JARVIS audio into ordinary SIM-call uplink/downlink audio.",
+                "limitation": "V29.2 does not inject synthesized JARVIS audio into ordinary SIM-call uplink/downlink audio.",
             }
         if action.name == "coding_status":
             return self.coding_service.status()

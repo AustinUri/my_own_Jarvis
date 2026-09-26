@@ -62,7 +62,7 @@ public final class MainActivity extends Activity {
         updateVoiceButton();
         updateStatus();
 
-        // V29.1: permissions use normal Android runtime prompts instead of ugly
+        // V29.2: permissions use normal Android runtime prompts instead of ugly
         // one-off buttons in the JARVIS UI. Call-log permission is optional and
         // can be refused by Android on non-dialer/sideloaded apps.
         if (!api.prefs().getBoolean("permission_onboarding_shown", false)) {

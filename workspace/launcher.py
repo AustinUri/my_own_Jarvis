@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def snapshot() -> dict:
         return {
-            'version': 29, 'build': '29.1',
+            'version': 29, 'build': '29.2',
             'runtime': dict(state),
             'config': asdict(config),
             'aiStatus': state.get('aiStatus', 'Checking AI provider…'),

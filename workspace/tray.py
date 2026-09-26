@@ -19,17 +19,17 @@ class WorkspaceTray:
     def __init__(self, app: QApplication, orchestrator, url: str, quit_callback, service_manager=None, surface_controller=None):
         self.app = app
         self.orchestrator = orchestrator
-        self.url = url.rstrip('/') + '/?build=29.1'
+        self.url = url.rstrip('/') + '/?build=29.2'
         self.quit_callback = quit_callback
         self.service_manager = service_manager
         self.workspace_window = None
         if JarvisIntegratedShell is not None:
             try:
-                self.workspace_window = JarvisIntegratedShell(self.url, build='29.1', surface_controller=surface_controller)
+                self.workspace_window = JarvisIntegratedShell(self.url, build='29.2', surface_controller=surface_controller)
             except Exception:
                 self.workspace_window = None
         self.icon = QSystemTrayIcon(self._make_icon(), app)
-        self.icon.setToolTip('JARVIS v29.1 — background runtime active')
+        self.icon.setToolTip('JARVIS v29.2 — background runtime active')
         self.menu = QMenu()
 
         open_action = QAction('Open JARVIS Control Center', self.menu)

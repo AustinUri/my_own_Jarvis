@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Continue"
 $env:PYTHONUTF8 = "1"
 Set-Location (Split-Path -Parent $PSScriptRoot)
-Write-Host "== JARVIS v29.1 doctor ==" -ForegroundColor Cyan
+Write-Host "== JARVIS v29.2 doctor ==" -ForegroundColor Cyan
 
 $py = Join-Path (Get-Location) ".venv\Scripts\python.exe"
 if (Test-Path $py) { Write-Host "[OK] .venv exists" -ForegroundColor Green; & $py --version } else { Write-Host "[FAIL] .venv missing. Run .\scripts\setup_windows.ps1" -ForegroundColor Red }

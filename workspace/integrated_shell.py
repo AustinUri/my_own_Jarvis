@@ -24,7 +24,7 @@ class JarvisIntegratedShell(QMainWindow):
     avoids V28's browser-stream crashes while keeping websites inside JARVIS.
     """
 
-    def __init__(self, workspace_url: str, build: str = '29.1', surface_controller=None) -> None:
+    def __init__(self, workspace_url: str, build: str = '29.2', surface_controller=None) -> None:
         if QWebEngineView is None:
             raise RuntimeError('Qt WebEngine is not available')
         super().__init__()

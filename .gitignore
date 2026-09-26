@@ -72,3 +72,12 @@ workspace_ui/node_modules/
 # The zero-build runtime bundle is intentionally versioned.
 !workspace_ui/dist/
 !workspace_ui/dist/**
+
+# Android local/generated state
+android_companion/.gradle/
+android_companion/local.properties
+android_companion/app/build/
+*.apk
+*.aab
+*.jks
+*.keystore

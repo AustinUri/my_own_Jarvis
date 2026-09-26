@@ -10,8 +10,8 @@ android {
         applicationId = "com.jarvis.companion"
         minSdk = 28
         targetSdk = 35
-        versionCode = 291
-        versionName = "0.8-v29.1"
+        versionCode = 292
+        versionName = "0.9-v29.2"
     }
 
     buildTypes {

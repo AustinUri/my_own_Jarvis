@@ -99,9 +99,14 @@ public final class JarvisForegroundService extends Service {
                 String number = args == null ? "" : args.optString("number", "");
                 String name = args == null ? "" : args.optString("name", "");
                 return ContactsBridge.call(this, number, name);
+            } else if ("whatsapp_message".equals(command)) {
+                String number = args == null ? "" : args.optString("number", "");
+                String name = args == null ? "" : args.optString("name", "");
+                String message = args == null ? "" : args.optString("message", "");
+                return WhatsAppBridge.compose(this, number, name, message);
             } else {
                 out.put("ok", false);
-                out.put("error", "Unsupported command. This v29.1 companion exposes only approved capabilities.");
+                out.put("error", "Unsupported command. This v29.2 companion exposes only approved capabilities.");
             }
         } catch (Exception ex) {
             try {

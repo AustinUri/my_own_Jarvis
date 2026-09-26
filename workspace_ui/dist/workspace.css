@@ -375,7 +375,7 @@ body.surface-focus .widget:not(.surface-focused-widget){opacity:.82!important}
 .surface-native-placeholder{flex:1;min-height:170px;border:1px dashed rgba(115,232,255,.28);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:18px;background:rgba(3,16,24,.38)}
 .surface-native-placeholder small{max-width:520px;color:var(--muted,#8297a6)}
 
-/* ===== v29.1 Phone Center ===== */
+/* ===== v29.2 Phone Center ===== */
 .call-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;padding:10px 12px;border:1px solid rgba(107,210,241,.16);border-radius:12px;background:rgba(5,24,35,.62)}
 .call-history-head b{display:block;color:#c9f7ff;font-size:10px;letter-spacing:.09em}.call-history-head small{display:block;color:#7196a5;font-size:8px;margin-top:3px}
 .call-list{display:flex;flex-direction:column;gap:6px;max-height:355px;overflow:auto;padding-right:3px}

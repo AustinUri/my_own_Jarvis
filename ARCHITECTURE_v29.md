@@ -1,4 +1,4 @@
-# JARVIS v29.1 architecture
+# JARVIS v29.2 architecture
 
 ```text
                          JARVIS CORE
@@ -31,4 +31,8 @@ Desktop Control Center
 
 No cloud AI API key is required. Aperture remains optional/off.
 
-Normal SIM call audio remains outside the public third-party Android capture path. V29.1 therefore separates call metadata from conversation summaries and never invents a summary when no recording/transcript exists.
+Normal SIM call audio remains outside the public third-party Android capture path. V29.2 therefore separates call metadata from conversation summaries and never invents a summary when no recording/transcript exists.
+
+
+## V29.2 mobile communications
+Phone Tap-to-Talk records audio locally in the companion and sends it over the authenticated private Tailscale bridge to the PC Whisper pipeline. WhatsApp composition is executed on Android after JARVIS resolves one canonical contact number. The companion opens the WhatsApp conversation with text pre-filled; V29.2 does not automate the final Send tap. Wake word model repair is bounded to packaged OpenWakeWord ONNX files and retries only once.

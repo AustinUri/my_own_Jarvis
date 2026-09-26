@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import threading
 import time
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable
 
@@ -58,6 +60,48 @@ class WakeWordListener:
         if self._on_log is not None:
             self._on_log(message)
 
+    def _repair_packaged_onnx(self, openwakeword_module, exc: Exception) -> bool:
+        """Remove only a damaged packaged OpenWakeWord ONNX asset, once.
+
+        We never delete arbitrary user files. The exception path must resolve under
+        openwakeword/resources/models, or we fall back specifically to hey_jarvis*.onnx.
+        """
+        text = str(exc)
+        bad_markers = ('INVALID_PROTOBUF', 'Protobuf parsing failed', 'Load model from')
+        if not any(marker.lower() in text.lower() for marker in bad_markers):
+            return False
+        try:
+            package_dir = Path(openwakeword_module.__file__).resolve().parent
+            models_dir = (package_dir / 'resources' / 'models').resolve()
+        except Exception:
+            return False
+
+        candidates: list[Path] = []
+        match = re.search(r'Load model from (.+?\.onnx) failed', text, flags=re.IGNORECASE)
+        if match:
+            candidates.append(Path(match.group(1).strip()))
+        candidates.extend(models_dir.glob('hey_jarvis*.onnx'))
+
+        deleted = False
+        seen: set[str] = set()
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+                key = str(resolved).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                if models_dir not in resolved.parents:
+                    continue
+                if resolved.suffix.lower() != '.onnx' or not resolved.exists():
+                    continue
+                resolved.unlink()
+                self._log(f'Removed damaged wake model: {resolved.name}')
+                deleted = True
+            except Exception as repair_exc:
+                self._log(f'Wake model repair could not remove {candidate}: {repair_exc}')
+        return deleted
+
     def _worker(self) -> None:
         try:
             import numpy as np
@@ -70,8 +114,21 @@ class WakeWordListener:
             return
 
         try:
+            # OpenWakeWord ships ONNX assets inside site-packages. A partially downloaded
+            # hey_jarvis model produces ONNXRuntime INVALID_PROTOBUF and used to kill the
+            # listener permanently. V29.2 validates by constructing the model and, only
+            # when the exception points at a packaged ONNX file, deletes that damaged
+            # asset and asks OpenWakeWord to download a clean copy once.
             openwakeword.utils.download_models()
-            model = Model(vad_threshold=self.vad_threshold)
+            try:
+                model = Model(vad_threshold=self.vad_threshold)
+            except Exception as first_exc:
+                repaired = self._repair_packaged_onnx(openwakeword, first_exc)
+                if not repaired:
+                    raise
+                self._log('Wake model looked damaged; downloaded a fresh OpenWakeWord model copy.')
+                openwakeword.utils.download_models()
+                model = Model(vad_threshold=self.vad_threshold)
             blocksize = 1280  # 80 ms at 16 kHz
             device = resolve_input_device(self.mic_name)
             self._log(f'Wake word mic: {self.mic_name}')

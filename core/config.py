@@ -130,7 +130,7 @@ class AppConfig:
 
     # v29 local-first developer + phone-agent foundation. No cloud AI API keys
     # are required; Coding JARVIS uses an isolated Git clone and the existing
-    # LM Studio provider. Cellular calling is dial/handoff only in v29.1.
+    # LM Studio provider. Cellular calling is dial/handoff only in v29.2.
     coding_jarvis_enabled: bool = True
     coding_mode: str = "assisted"
     coding_repo_url: str = "https://github.com/AustinUri/my_own_Jarvis.git"

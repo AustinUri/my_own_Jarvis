@@ -151,7 +151,7 @@ class CodingJarvisService:
         if not ready.get('ok'):
             return ready
 
-        # v29.1: search is still local/deterministic, but it is no longer one
+        # v29.2: search is still local/deterministic, but it is no longer one
         # exact phrase only. Natural requests such as "Surface browser
         # implementation" fan out to meaningful code tokens/symbols.
         raw_terms = [query.lower()]

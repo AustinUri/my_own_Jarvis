@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 
 EXPLICIT_ACTION_RE = re.compile(
-    r"\b(open|launch|run|start|close|quit|kill|show|hide|switch|bring\s+up|bring|pull\s+up|dock|embed|navigate|go\s+to|lock|shutdown|turn\s+off|create|write|save|search\s+for|find|call|dial|phone|fix|change|modify|apply|commit)\b"
-    r"|(?:פתח|תפתח|תפעיל|תריץ|סגור|תסגור|תציג|תראה|תביא|נעל|כבה|כתוב|תרשום|שמור|חפש|מצא)",
+    r"\b(open|launch|run|start|close|quit|kill|show|hide|switch|bring\s+up|bring|pull\s+up|dock|embed|navigate|go\s+to|lock|shutdown|turn\s+off|create|write|save|search\s+for|find|call|dial|phone|send|message|text|whatsapp|fix|change|modify|apply|commit)\b"
+    r"|(?:פתח|תפתח|תפעיל|תריץ|סגור|תסגור|תציג|תראה|תביא|נעל|כבה|כתוב|תרשום|שמור|חפש|מצא|שלח|הודעה|וואטסאפ)",
     re.IGNORECASE,
 )
 
@@ -33,6 +33,7 @@ UI_MUTATING_TOOLS = {
     "calendar_create_event",
     "phone_call_contact",
     "phone_call_number",
+    "phone_whatsapp_contact",
     "coding_apply_patch",
     "coding_commit",
 }
