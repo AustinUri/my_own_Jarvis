@@ -51,7 +51,7 @@ def require_auth(authorization: str | None = Header(default=None)):
             detail="JARVIS authentication is not configured",
         )
 
-    if not validate_device_token(device_id, authorization):
+    if not token_is_valid(authorization):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
@@ -112,7 +112,7 @@ async def device_socket(
 ):
     authorization = websocket.headers.get("authorization")
 
-    if not token_is_valid(authorization):
+    if not validate_device_token(device_id, authorization):
         await websocket.close(code=1008)
         return
 
