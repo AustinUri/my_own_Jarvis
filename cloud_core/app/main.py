@@ -17,6 +17,10 @@ from fastapi import (
 )
 
 from .device_bus import device_manager
+from .phone_pairing import (
+    router as phone_pairing_router,
+    validate_device_token,
+)
 
 
 app = FastAPI(
@@ -47,7 +51,7 @@ def require_auth(authorization: str | None = Header(default=None)):
             detail="JARVIS authentication is not configured",
         )
 
-    if not token_is_valid(authorization):
+    if not validate_device_token(device_id, authorization):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
@@ -144,3 +148,6 @@ async def device_socket(
     except Exception:
         device_manager.disconnect(device_id)
         raise
+
+
+app.include_router(phone_pairing_router)
