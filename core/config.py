@@ -54,8 +54,8 @@ class AppConfig:
     auto_load_ai_model: bool = True
     ai_local_model_key: str = "qwen/qwen3.5-9b"
     ai_context_length: int = 16384
-    auto_start_docker_desktop: bool = True
-    auto_start_searxng: bool = True
+    auto_start_docker_desktop: bool = False
+    auto_start_searxng: bool = False
     service_health_interval_seconds: float = 45.0
 
     # Daily intelligence

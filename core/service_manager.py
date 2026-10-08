@@ -180,6 +180,11 @@ class ServiceManager:
             return False
 
     def _start_docker_desktop(self) -> None:
+        # V30: Docker Desktop must never be started implicitly.
+        # Local SearXNG is optional; users may start Docker manually when wanted.
+        if str(os.environ.get("JARVIS_ALLOW_DOCKER_AUTOSTART", "")).strip().lower() not in {"1", "true", "yes", "on"}:
+            self.log("Docker Desktop auto-start is disabled in V30; local SearXNG remains optional.")
+            return
         candidates = [
             Path(r'C:\Program Files\Docker\Docker\Docker Desktop.exe'),
             Path(os.environ.get('LOCALAPPDATA', '')) / 'Docker' / 'Docker Desktop.exe',
