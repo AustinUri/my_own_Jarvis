@@ -4,6 +4,8 @@ import os
 import platform
 import socket
 
+from pydantic import BaseModel, Field
+
 from fastapi import (
     Depends,
     FastAPI,
@@ -20,6 +22,12 @@ from .device_bus import device_manager
 from .phone_pairing import (
     router as phone_pairing_router,
     validate_device_token,
+)
+
+from .reasoning import (
+    ReasoningError,
+    cloud_reasoning_chat,
+    cloud_reasoning_health,
 )
 
 
@@ -58,6 +66,14 @@ def require_auth(authorization: str | None = Header(default=None)):
         )
 
     return True
+
+
+class ReasoningRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+    system: str | None = Field(default=None, max_length=6000)
+    temperature: float = Field(default=0.2, ge=0.0, le=1.5)
+    max_tokens: int = Field(default=500, ge=64, le=1500)
+    deep: bool = False
 
 
 @app.get("/")
@@ -99,6 +115,43 @@ def connected_devices(_: bool = Depends(require_auth)):
         "count": len(devices),
         "devices": devices,
     }
+
+
+@app.get("/api/v1/reasoning/health")
+async def reasoning_health(_: bool = Depends(require_auth)):
+    try:
+        upstream = await cloud_reasoning_health()
+    except ReasoningError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "ok": True,
+        "provider": "oracle-qwen",
+        "upstream": upstream,
+    }
+
+
+@app.post("/api/v1/reasoning/chat")
+async def reasoning_chat(
+    body: ReasoningRequest,
+    _: bool = Depends(require_auth),
+):
+    try:
+        return await cloud_reasoning_chat(
+            text=body.text,
+            system_prompt=body.system,
+            temperature=body.temperature,
+            max_tokens=body.max_tokens,
+            deep=body.deep,
+        )
+    except ReasoningError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
 
 
 @app.websocket("/api/v1/ws/{device_id}")
