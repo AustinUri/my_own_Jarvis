@@ -72,6 +72,20 @@ def require_auth(authorization: str | None = Header(default=None)):
     return True
 
 
+class DeviceJobRequest(BaseModel):
+    job_type: str = Field(
+        pattern=r"^[A-Za-z0-9._-]{1,64}$",
+    )
+    payload: dict = Field(
+        default_factory=dict,
+    )
+    timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=120.0,
+    )
+
+
 class ReasoningRequest(BaseModel):
     text: str = Field(min_length=1, max_length=12000)
     system: str | None = Field(default=None, max_length=6000)
@@ -157,6 +171,48 @@ async def reasoning_chat(
             route=body.route,
         )
     except (ReasoningError, ReasoningRouteError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+
+@app.post("/api/v1/devices/{device_id}/jobs")
+async def run_device_job(
+    body: DeviceJobRequest,
+    device_id: str = Path(
+        ...,
+        pattern=r"^[A-Za-z0-9._-]{1,64}$",
+    ),
+    _: bool = Depends(require_auth),
+):
+    if not device_manager.is_connected(device_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Device '{device_id}' is not connected",
+        )
+
+    try:
+        return await device_manager.request(
+            device_id=device_id,
+            job_type=body.job_type,
+            payload=body.payload,
+            timeout=body.timeout_seconds,
+        )
+
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Device '{device_id}' did not respond in time",
+        ) from exc
+
+    except ConnectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),

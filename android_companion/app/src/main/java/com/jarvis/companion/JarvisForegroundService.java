@@ -169,6 +169,11 @@ public final class JarvisForegroundService extends Service {
 
                                 if ("welcome".equals(type)) {
                                     webSocket.send("ping");
+                                    return;
+                                }
+
+                                if ("job".equals(type)) {
+                                    handleJob(webSocket, message);
                                 }
 
                             } catch (Exception ignored) {
@@ -205,6 +210,277 @@ public final class JarvisForegroundService extends Service {
             reconnectLater();
         }
     }
+
+    private void handleJob(
+            WebSocket webSocket,
+            JSONObject message
+    ) {
+
+        final String jobId =
+                message.optString("job_id", "");
+
+        final String jobType =
+                message.optString("job_type", "");
+
+        JSONObject suppliedPayload =
+                message.optJSONObject("payload");
+
+        final JSONObject payload =
+                suppliedPayload == null
+                        ? new JSONObject()
+                        : suppliedPayload;
+
+        new Thread(() -> {
+
+            JSONObject reply =
+                    new JSONObject();
+
+            try {
+
+                reply.put(
+                        "type",
+                        "job_result"
+                );
+
+                reply.put(
+                        "job_id",
+                        jobId
+                );
+
+                reply.put(
+                        "device_id",
+                        PhoneApiClient.DEVICE_ID
+                );
+
+                JSONObject result =
+                        executePhoneJob(
+                                jobType,
+                                payload
+                        );
+
+                reply.put(
+                        "ok",
+                        true
+                );
+
+                reply.put(
+                        "result",
+                        result
+                );
+
+            } catch (Exception ex) {
+
+                try {
+                    reply.put(
+                            "type",
+                            "job_result"
+                    );
+
+                    reply.put(
+                            "job_id",
+                            jobId
+                    );
+
+                    reply.put(
+                            "device_id",
+                            PhoneApiClient.DEVICE_ID
+                    );
+
+                    reply.put(
+                            "ok",
+                            false
+                    );
+
+                    String messageText =
+                            ex.getMessage();
+
+                    if (
+                            messageText == null
+                            || messageText.trim().isEmpty()
+                    ) {
+                        messageText =
+                                ex.getClass()
+                                        .getSimpleName();
+                    }
+
+                    reply.put(
+                            "error",
+                            messageText
+                    );
+
+                } catch (Exception ignored) {
+                }
+            }
+
+            webSocket.send(
+                    reply.toString()
+            );
+
+        }, "jarvis-phone-job").start();
+    }
+
+
+    private JSONObject executePhoneJob(
+            String jobType,
+            JSONObject payload
+    ) throws Exception {
+
+        JSONObject out =
+                new JSONObject();
+
+        switch (jobType) {
+
+            case "phone.capabilities":
+
+                out.put(
+                        "calendar",
+                        true
+                );
+
+                out.put(
+                        "contacts",
+                        true
+                );
+
+                out.put(
+                        "call_history",
+                        true
+                );
+
+                out.put(
+                        "cellular_call",
+                        true
+                );
+
+                out.put(
+                        "whatsapp_compose",
+                        true
+                );
+
+                out.put(
+                        "whatsapp_auto_send",
+                        false
+                );
+
+                return out;
+
+
+            case "phone.calendar_upcoming":
+
+                int days =
+                        payload.optInt(
+                                "days",
+                                7
+                        );
+
+                out.put(
+                        "events",
+                        CalendarBridge.upcoming(
+                                this,
+                                days
+                        )
+                );
+
+                return out;
+
+
+            case "phone.contacts_search":
+
+                String query =
+                        payload.optString(
+                                "query",
+                                ""
+                        );
+
+                out.put(
+                        "contacts",
+                        ContactsBridge.search(
+                                this,
+                                query
+                        )
+                );
+
+                return out;
+
+
+            case "phone.call_history":
+
+                int limit =
+                        payload.optInt(
+                                "limit",
+                                20
+                        );
+
+                out.put(
+                        "calls",
+                        CallLogBridge.recent(
+                                this,
+                                limit
+                        )
+                );
+
+                out.put(
+                        "full_history",
+                        CallLogBridge.hasFullAccess(
+                                this
+                        )
+                );
+
+                out.put(
+                        "history_source",
+                        CallLogBridge.hasFullAccess(
+                                this
+                        )
+                                ? "android_call_log"
+                                : "jarvis_calls_only"
+                );
+
+                return out;
+
+
+            case "phone.call":
+
+                return ContactsBridge.call(
+                        this,
+                        payload.optString(
+                                "number",
+                                ""
+                        ),
+                        payload.optString(
+                                "name",
+                                ""
+                        )
+                );
+
+
+            case "phone.whatsapp_compose":
+
+                return WhatsAppBridge.compose(
+                        this,
+                        payload.optString(
+                                "number",
+                                ""
+                        ),
+                        payload.optString(
+                                "name",
+                                ""
+                        ),
+                        payload.optString(
+                                "message",
+                                ""
+                        )
+                );
+
+
+            default:
+
+                throw new IllegalArgumentException(
+                        "Unsupported phone job: "
+                                + jobType
+                );
+        }
+    }
+
 
     private void markDisconnected() {
 
