@@ -88,12 +88,20 @@ async def route_reasoning(
                 windows_error or "Windows reasoning failed"
             )
 
+    # If a deep Windows job failed in AUTO mode, prefer a concise
+    # Oracle answer over allowing the slower Oracle model to exhaust
+    # the same small token budget on hidden reasoning.
+    oracle_deep = deep
+
+    if windows_error and route == "auto":
+        oracle_deep = False
+
     result = await cloud_reasoning_chat(
         text=text,
         system_prompt=system_prompt,
         temperature=temperature,
         max_tokens=max_tokens,
-        deep=deep,
+        deep=oracle_deep,
     )
 
     result["route"] = "oracle"

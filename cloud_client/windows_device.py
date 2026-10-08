@@ -77,12 +77,20 @@ def run_local_reasoning(payload: dict) -> dict:
         payload.get("temperature", 0.2)
     )
 
-    max_tokens = int(
+    requested_max_tokens = int(
         payload.get("max_tokens", 700)
     )
 
     deep = bool(
         payload.get("deep", False)
+    )
+
+    # Qwen reasoning and final-answer tokens share the same output budget.
+    # Deep work therefore gets enough room to reason AND finish its answer.
+    max_tokens = (
+        max(requested_max_tokens, 1200)
+        if deep
+        else requested_max_tokens
     )
 
     combined_input = (
@@ -168,8 +176,24 @@ def run_local_reasoning(payload: dict) -> dict:
     answer = "\n".join(parts).strip()
 
     if not answer:
+        stats = raw.get("stats")
+
+        if not isinstance(stats, dict):
+            stats = {}
+
+        reasoning_tokens = int(
+            stats.get("reasoning_output_tokens") or 0
+        )
+        total_tokens = int(
+            stats.get("total_output_tokens") or 0
+        )
+
+        # Never send the model's private reasoning trace back to Cloud Core.
         raise RuntimeError(
-            f"Windows Qwen returned no final answer: {raw!r}"
+            "Windows Qwen produced no final answer "
+            f"(reasoning_tokens={reasoning_tokens}, "
+            f"total_output_tokens={total_tokens}, "
+            f"budget={max_tokens})"
         )
 
     stats = raw.get("stats")
