@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import hmac
+import json
 import os
 import platform
 import socket
@@ -26,8 +27,11 @@ from .phone_pairing import (
 
 from .reasoning import (
     ReasoningError,
-    cloud_reasoning_chat,
     cloud_reasoning_health,
+)
+from .reasoning_router import (
+    ReasoningRouteError,
+    route_reasoning,
 )
 
 
@@ -74,6 +78,10 @@ class ReasoningRequest(BaseModel):
     temperature: float = Field(default=0.2, ge=0.0, le=1.5)
     max_tokens: int = Field(default=500, ge=64, le=1500)
     deep: bool = False
+    route: str = Field(
+        default="auto",
+        pattern=r"^(auto|oracle|windows)$",
+    )
 
 
 @app.get("/")
@@ -140,14 +148,15 @@ async def reasoning_chat(
     _: bool = Depends(require_auth),
 ):
     try:
-        return await cloud_reasoning_chat(
+        return await route_reasoning(
             text=body.text,
             system_prompt=body.system,
             temperature=body.temperature,
             max_tokens=body.max_tokens,
             deep=body.deep,
+            route=body.route,
         )
-    except ReasoningError as exc:
+    except (ReasoningError, ReasoningRouteError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
@@ -189,17 +198,31 @@ async def device_socket(
                     "time_utc": datetime.now(timezone.utc).isoformat(),
                 })
             else:
-                await websocket.send_json({
-                    "type": "received",
-                    "device_id": device_id,
-                    "message": message,
-                })
+                try:
+                    payload = json.loads(message)
+                except json.JSONDecodeError:
+                    payload = None
+
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("type") == "job_result"
+                ):
+                    device_manager.resolve_job_result(
+                        device_id,
+                        payload,
+                    )
+                else:
+                    await websocket.send_json({
+                        "type": "received",
+                        "device_id": device_id,
+                        "message": message,
+                    })
 
     except WebSocketDisconnect:
-        device_manager.disconnect(device_id)
+        device_manager.disconnect(device_id, websocket)
 
     except Exception:
-        device_manager.disconnect(device_id)
+        device_manager.disconnect(device_id, websocket)
         raise
 
 

@@ -65,6 +65,7 @@ class OpenAICompatibleProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.35,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         model = self.resolve_model()
         payload: dict[str, Any] = {
@@ -73,6 +74,9 @@ class OpenAICompatibleProvider:
             "temperature": float(temperature),
             "stream": False,
         }
+
+        if max_tokens is not None:
+            payload["max_tokens"] = int(max_tokens)
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
