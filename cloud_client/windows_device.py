@@ -1,20 +1,13 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
 import os
-import sys
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import websockets
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from agent.provider import OpenAICompatibleProvider
 
 
 DEVICE_ID = "uri-windows"
@@ -31,10 +24,10 @@ TOKEN_FILE = (
     / "cloud.token"
 )
 
-AI_BASE_URL = os.getenv(
-    "JARVIS_WINDOWS_AI_BASE_URL",
-    "http://127.0.0.1:1234/v1",
-)
+LM_STUDIO_URL = os.getenv(
+    "JARVIS_WINDOWS_LM_STUDIO_URL",
+    "http://127.0.0.1:1234",
+).rstrip("/")
 
 AI_MODEL = os.getenv(
     "JARVIS_WINDOWS_AI_MODEL",
@@ -88,42 +81,112 @@ def run_local_reasoning(payload: dict) -> dict:
         payload.get("max_tokens", 700)
     )
 
-    provider = OpenAICompatibleProvider(
-        base_url=AI_BASE_URL,
-        model=AI_MODEL,
-        api_key="lm-studio",
-        timeout=AI_TIMEOUT,
+    deep = bool(
+        payload.get("deep", False)
     )
 
-    message = provider.chat(
-        messages=[
-            {
-                "role": "system",
-                "content": system,
-            },
-            {
-                "role": "user",
-                "content": text,
-            },
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
+    combined_input = (
+        f"System instructions:\n{system}\n\n"
+        f"User request:\n{text}"
     )
 
-    answer = str(
-        message.get("content") or ""
-    ).strip()
+    body = {
+        "model": AI_MODEL,
+        "input": combined_input,
+        "reasoning": "on" if deep else "off",
+        "temperature": temperature,
+        "max_output_tokens": max_tokens,
+        "store": False,
+    }
+
+    request = Request(
+        f"{LM_STUDIO_URL}/api/v1/chat",
+        data=json.dumps(
+            body,
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(
+            request,
+            timeout=AI_TIMEOUT,
+        ) as response:
+            raw = json.loads(
+                response.read().decode("utf-8")
+            )
+
+    except HTTPError as exc:
+        try:
+            detail = exc.read().decode(
+                "utf-8",
+                errors="replace",
+            )[:1000]
+        except Exception:
+            detail = ""
+
+        raise RuntimeError(
+            f"LM Studio returned HTTP {exc.code}: {detail}"
+        ) from exc
+
+    except (
+        URLError,
+        TimeoutError,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise RuntimeError(
+            f"LM Studio request failed: {exc}"
+        ) from exc
+
+    output = raw.get("output")
+
+    if not isinstance(output, list):
+        raise RuntimeError(
+            "LM Studio returned no output list"
+        )
+
+    parts = []
+
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+
+        if item.get("type") != "message":
+            continue
+
+        content = item.get("content")
+
+        if isinstance(content, str) and content.strip():
+            parts.append(content.strip())
+
+    answer = "\n".join(parts).strip()
 
     if not answer:
         raise RuntimeError(
-            "Windows Qwen returned no final answer"
+            f"Windows Qwen returned no final answer: {raw!r}"
         )
+
+    stats = raw.get("stats")
+
+    if not isinstance(stats, dict):
+        stats = {}
 
     return {
         "ok": True,
         "provider": "windows-qwen",
-        "model": provider.resolve_model(),
+        "model": raw.get(
+            "model_instance_id",
+            AI_MODEL,
+        ),
         "text": answer,
+        "reasoning": "on" if deep else "off",
+        "stats": stats,
     }
 
 
@@ -239,7 +302,7 @@ async def run():
 
         except KeyboardInterrupt:
             print(
-                "\n[V30] Windows client stopped."
+                "`n[V30] Windows client stopped."
             )
             return
 

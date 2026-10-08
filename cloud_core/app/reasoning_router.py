@@ -60,6 +60,7 @@ async def route_reasoning(
                         "system": system_prompt or DEFAULT_SYSTEM_PROMPT,
                         "temperature": temperature,
                         "max_tokens": max_tokens,
+                        "deep": deep,
                     },
                     timeout=240.0,
                 )
