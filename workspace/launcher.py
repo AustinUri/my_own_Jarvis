@@ -21,6 +21,7 @@ from workspace.activity import ActivityTimeline
 from vision.camera_state import CameraState
 from vision.hololab import run_visual_tests
 from phone.cloud_hub import CloudPhoneHub
+from cloud_client.api import CloudApiClient, DEFAULT_WINDOWS_DEVICE_ID
 from core.agent_mesh import AgentMesh
 from core.resource_governor import ResourceGovernor
 from workspace.native_surface import NativeSurfaceController
@@ -51,6 +52,55 @@ class CommandRouter(QObject):
             self.surface_controller.close()
         except Exception:
             pass
+
+    def refresh_phone_dependent_widgets(self, status: dict | None = None, reason: str = "manual") -> dict:
+        """Refresh every Windows widget whose source of truth is the Samsung.
+
+        The lightweight connection watcher calls this only on startup or an
+        OFFLINE -> ONLINE transition.  Call history/calendar are therefore not
+        polled continuously, while the UI is fresh as soon as the phone is
+        available through Oracle.
+        """
+        st = dict(status or self.phone_hub.status())
+        self.publish('phone_status', st)
+        if not bool(st.get('connected')):
+            return st
+
+        try:
+            capabilities = self.phone_hub.request('capabilities', {}, timeout=12.0)
+            if isinstance(capabilities, dict):
+                st['capabilities'] = capabilities
+                self.publish('phone_status', st)
+        except Exception as exc:
+            self.publish('log', f'Phone capability refresh warning ({reason}): {exc}')
+
+        try:
+            result = self.phone_hub.request('call_log_list', {'limit': 30}, timeout=20.0)
+            calls = (result.get('calls') or []) if isinstance(result, dict) else []
+            self.publish('phone_call_history', {
+                'ok': True,
+                'calls': calls,
+                'count': len(calls),
+                'full_history': bool(result.get('full_history')) if isinstance(result, dict) else False,
+                'history_source': str(result.get('history_source') or 'unknown') if isinstance(result, dict) else 'unknown',
+                'refresh_reason': reason,
+            })
+        except Exception as exc:
+            self.publish('phone_call_history', {
+                'ok': False,
+                'calls': [],
+                'error': str(exc),
+                'refresh_reason': reason,
+            })
+
+        try:
+            tools = self.orchestrator.tools
+            self.publish('calendar_status', tools.calendar_status_data())
+            self.publish('calendar_events', tools.list_calendar_events(days=3))
+        except Exception as exc:
+            self.publish('log', f'Phone calendar refresh warning ({reason}): {exc}')
+
+        return st
 
     @Slot(dict)
     def _dispatch(self, message: dict) -> None:
@@ -155,7 +205,7 @@ class CommandRouter(QObject):
             self._thread(pair_phone, 'jarvis-cloud-phone-pair')
         elif action == 'phone_status':
             def phone_status():
-                self.publish('phone_status', self.phone_hub.status())
+                self.refresh_phone_dependent_widgets(reason='manual-refresh')
             self._thread(phone_status, 'jarvis-cloud-phone-status')
         elif action == 'phone_call_history':
             def phone_call_history():
@@ -277,6 +327,36 @@ def main(argv: list[str] | None = None) -> int:
 
     phone_hub = CloudPhoneHub(config, log=lambda m: publish('log', m), status_callback=lambda data: publish('phone_status', data))
     orchestrator.tools.set_phone_hub(phone_hub)
+
+    # Oracle owns the canonical V30 cross-device memory.  The Windows runtime
+    # mirrors normal local conversation turns there so Samsung and future
+    # clients share the same history even while Windows keeps its local tools.
+    memory_api = CloudApiClient(
+        base_url=str(getattr(config, 'cloud_base_url', '') or 'https://uri-jarvis.duckdns.org'),
+        timeout=float(getattr(config, 'cloud_request_timeout_seconds', 10.0)),
+    )
+
+    def sync_memory_turn(role: str, text: str) -> None:
+        clean = str(text or '').strip()
+        if not clean or clean == '[nothing heard]':
+            return
+
+        def worker():
+            try:
+                memory_api.record_memory_turn(
+                    role,
+                    clean,
+                    source_device=DEFAULT_WINDOWS_DEVICE_ID,
+                )
+            except Exception as exc:
+                # Memory sync must never break the local conversation path.
+                publish('log', f'Shared memory sync warning: {exc}')
+
+        threading.Thread(
+            target=worker,
+            name=f'jarvis-memory-{role}',
+            daemon=True,
+        ).start()
     state['phoneStatus'] = phone_hub.status()
     state['calendarStatus'] = orchestrator.tools.calendar_status_data()
 
@@ -289,6 +369,47 @@ def main(argv: list[str] | None = None) -> int:
     state['surfaceStatus'] = surface_controller.status()
     router = CommandRouter(bridge, camera_state, publish, orchestrator, phone_hub, agent_mesh, resource_governor, surface_controller)
     profile_store = WorkspaceProfileStore()
+
+    # Keep phone-backed widgets fresh without making call-history/calendar heavy
+    # polling loops.  Status is lightweight-polled; dependent widgets refresh
+    # once at startup if the Samsung is already online and again on reconnect.
+    phone_watch_stop = threading.Event()
+
+    def watch_phone_connection() -> None:
+        first = True
+        last_connected: bool | None = None
+        while not phone_watch_stop.is_set():
+            try:
+                status = phone_hub.status()
+                connected = bool(status.get('connected'))
+                if first or connected != last_connected:
+                    publish('phone_status', status)
+                    if connected:
+                        router.refresh_phone_dependent_widgets(
+                            status=status,
+                            reason='startup' if first else 'reconnect',
+                        )
+                    elif last_connected:
+                        # Clear phone-backed data when the device goes offline so
+                        # stale widgets are not presented as live information.
+                        publish('phone_call_history', {
+                            'ok': False,
+                            'calls': [],
+                            'error': 'Samsung is offline.',
+                            'refresh_reason': 'disconnect',
+                        })
+                        publish('calendar_status', orchestrator.tools.calendar_status_data())
+                last_connected = connected
+                first = False
+            except Exception as exc:
+                publish('log', f'Phone connection watcher warning: {exc}')
+            phone_watch_stop.wait(8.0)
+
+    threading.Thread(
+        target=watch_phone_connection,
+        name='jarvis-phone-widget-watcher',
+        daemon=True,
+    ).start()
 
     briefing_started = threading.Event()
     def prepare_arrival_briefing() -> None:
@@ -352,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     def on_transcript(text: str, lang: str) -> None:
         state['transcript'] = text
         publish('transcript', {'text': text, 'language': lang})
+        sync_memory_turn('user', text)
         if (text or '').strip() and text != '[nothing heard]' and getattr(config, 'agent_mesh_enabled', True):
             try:
                 resources = resource_governor.snapshot().to_dict()
@@ -364,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         state['response'] = text
         state['responseLanguage'] = lang
         publish('response', {'text': text, 'language': lang})
+        sync_memory_turn('assistant', text)
         if getattr(config, 'agent_mesh_enabled', True):
             publish('agent_mesh', agent_mesh.complete(resource=resource_governor.snapshot().to_dict()))
         push_activity(activity.output(text))
@@ -394,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
     service_manager.start()
 
     def quit_all() -> None:
+        phone_watch_stop.set()
         router.shutdown_surface()
         service_manager.stop()
         orchestrator.shutdown()
@@ -414,6 +538,7 @@ def main(argv: list[str] | None = None) -> int:
         QTimer.singleShot(900, tray.open_workspace)
 
     exit_code = app.exec()
+    phone_watch_stop.set()
     router.shutdown_surface()
     service_manager.stop()
     config.save(config_path)

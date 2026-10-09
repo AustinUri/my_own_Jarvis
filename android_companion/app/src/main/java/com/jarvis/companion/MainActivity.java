@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.speech.RecognizerIntent;
+import android.speech.tts.TextToSpeech;
 import android.widget.EditText;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -14,15 +16,20 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public final class MainActivity extends Activity {
 
     private static final int REQ_CORE_PERMISSIONS = 3001;
+    private static final int REQ_VOICE_INPUT = 3002;
 
     private PhoneApiClient api;
     private EditText pairCode;
+    private EditText askText;
     private TextView status;
+    private TextView jarvisReply;
     private Switch voiceReplySwitch;
+    private TextToSpeech tts;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,7 +39,9 @@ public final class MainActivity extends Activity {
 
         api = new PhoneApiClient(this);
         pairCode = findViewById(R.id.pairCode);
+        askText = findViewById(R.id.askText);
         status = findViewById(R.id.statusText);
+        jarvisReply = findViewById(R.id.jarvisReply);
         voiceReplySwitch = findViewById(R.id.voiceReplySwitch);
 
         findViewById(R.id.testConnectionButton)
@@ -40,6 +49,14 @@ public final class MainActivity extends Activity {
 
         findViewById(R.id.pairButton)
                 .setOnClickListener(v -> pair());
+
+        findViewById(R.id.askButton)
+                .setOnClickListener(v -> askJarvis(
+                        askText.getText().toString()
+                ));
+
+        findViewById(R.id.voiceAskButton)
+                .setOnClickListener(v -> startVoiceInput());
 
         boolean voiceReplies = api.prefs()
                 .getBoolean("voice_replies_enabled", true);
@@ -50,6 +67,12 @@ public final class MainActivity extends Activity {
                         .edit()
                         .putBoolean("voice_replies_enabled", isChecked)
                         .apply());
+
+        tts = new TextToSpeech(this, statusCode -> {
+            if (statusCode == TextToSpeech.SUCCESS) {
+                tts.setLanguage(Locale.getDefault());
+            }
+        });
 
         ensurePermissions();
         updateStatus();
@@ -116,6 +139,102 @@ public final class MainActivity extends Activity {
                         ));
             }
         }, "jarvis-cloud-pair").start();
+    }
+
+    private void askJarvis(String text) {
+        String clean = text == null ? "" : text.trim();
+        if (clean.isEmpty()) {
+            jarvisReply.setText("Enter a message for JARVIS.");
+            return;
+        }
+
+        if (!api.isPaired()) {
+            jarvisReply.setText("Pair the Samsung with JARVIS Cloud first.");
+            return;
+        }
+
+        jarvisReply.setText("JARVIS is thinking…");
+        askText.setText("");
+
+        new Thread(() -> {
+            try {
+                JSONObject result = api.askJarvis(clean);
+                String reply = result.optString("text", "").trim();
+                if (reply.isEmpty()) {
+                    reply = "JARVIS returned no text response.";
+                }
+
+                final String answer = reply;
+                runOnUiThread(() -> {
+                    jarvisReply.setText(answer);
+                    if (voiceReplySwitch.isChecked() && tts != null) {
+                        tts.speak(
+                                answer,
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                "jarvis-v30-reply"
+                        );
+                    }
+                });
+
+            } catch (Exception ex) {
+                runOnUiThread(() ->
+                        jarvisReply.setText(
+                                "JARVIS request failed:\n" + ex.getMessage()
+                        ));
+            }
+        }, "jarvis-mobile-chat").start();
+    }
+
+    private void startVoiceInput() {
+        ensurePermissions();
+
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+        );
+        intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault().toLanguageTag()
+        );
+        intent.putExtra(
+                RecognizerIntent.EXTRA_PROMPT,
+                "Speak to JARVIS"
+        );
+
+        try {
+            startActivityForResult(intent, REQ_VOICE_INPUT);
+        } catch (Exception ex) {
+            jarvisReply.setText(
+                    "Voice recognition is unavailable:\n" + ex.getMessage()
+            );
+        }
+    }
+
+    @Override
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode != REQ_VOICE_INPUT || resultCode != RESULT_OK || data == null) {
+            return;
+        }
+
+        ArrayList<String> matches = data.getStringArrayListExtra(
+                RecognizerIntent.EXTRA_RESULTS
+        );
+
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+
+        String transcript = matches.get(0);
+        askText.setText(transcript);
+        askJarvis(transcript);
     }
 
     private void startCloudLink() {
@@ -192,5 +311,15 @@ public final class MainActivity extends Activity {
 
     private void setStatus(String text) {
         status.setText(text);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            tts = null;
+        }
+        super.onDestroy();
     }
 }

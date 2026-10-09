@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -268,6 +268,46 @@ async def heartbeat(websocket):
         await websocket.send("ping")
 
 
+_WINDOWS_DEVICE_INSTANCE_LOCK = None
+
+
+def acquire_single_instance() -> bool:
+    """Allow only one uri-windows Device Bus worker per Windows login.
+
+    Two workers using the same device_id continually replace each other on
+    Oracle, producing repeated WebSocket close code 1000/reconnect loops.
+    """
+    global _WINDOWS_DEVICE_INSTANCE_LOCK
+
+    if os.name != "nt":
+        return True
+
+    import msvcrt
+
+    lock_path = (
+        Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        / "Jarvis"
+        / "windows_device.lock"
+    )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    handle = open(lock_path, "a+b")
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() < 1:
+        handle.write(b"0")
+        handle.flush()
+    handle.seek(0)
+
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
+        return False
+
+    _WINDOWS_DEVICE_INSTANCE_LOCK = handle
+    return True
+
+
 async def run():
     token = load_token()
 
@@ -341,4 +381,8 @@ async def run():
 
 
 if __name__ == "__main__":
+    if not acquire_single_instance():
+        print("[V30] Another uri-windows Device Bus client is already running. Exiting duplicate instance.")
+        raise SystemExit(0)
+    print("[V30] Single-instance lock acquired for uri-windows.")
     asyncio.run(run())

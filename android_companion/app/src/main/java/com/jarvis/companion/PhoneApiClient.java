@@ -31,7 +31,7 @@ public final class PhoneApiClient {
     private final OkHttpClient client =
             new OkHttpClient.Builder()
                     .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(180, TimeUnit.SECONDS)
                     .writeTimeout(30, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true)
                     .build();
@@ -125,6 +125,34 @@ public final class PhoneApiClient {
         return context.getSharedPreferences(
                 PREFS,
                 Context.MODE_PRIVATE
+        );
+    }
+
+    public JSONObject askJarvis(String text) throws Exception {
+        String clean = text == null ? "" : text.trim();
+
+        if (clean.isEmpty()) {
+            throw new IllegalArgumentException("Enter a message for JARVIS.");
+        }
+
+        if (!isPaired()) {
+            throw new IllegalStateException("Pair the Samsung with JARVIS Cloud first.");
+        }
+
+        JSONObject body = new JSONObject();
+        body.put("text", clean);
+        body.put("source_device", DEVICE_ID);
+        body.put("memory_scope", "primary");
+        body.put("use_memory", true);
+        body.put("route", "auto");
+        body.put("deep", false);
+        body.put("temperature", 0.2);
+        body.put("max_tokens", 500);
+
+        return post(
+                "/api/v1/device/" + DEVICE_ID + "/assistant/chat",
+                body,
+                deviceToken()
         );
     }
 

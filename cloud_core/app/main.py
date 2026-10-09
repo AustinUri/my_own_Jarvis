@@ -26,6 +26,7 @@ from .phone_pairing import (
 )
 
 from .reasoning import (
+    DEFAULT_SYSTEM_PROMPT,
     ReasoningError,
     cloud_reasoning_health,
 )
@@ -33,6 +34,7 @@ from .reasoning_router import (
     ReasoningRouteError,
     route_reasoning,
 )
+from .shared_memory import DEFAULT_SCOPE, memory_store
 
 
 app = FastAPI(
@@ -98,6 +100,154 @@ class ReasoningRequest(BaseModel):
     )
 
 
+class AssistantChatRequest(ReasoningRequest):
+    source_device: str = Field(
+        default="uri-windows",
+        pattern=r"^[A-Za-z0-9._-]{1,64}$",
+    )
+    memory_scope: str = Field(default=DEFAULT_SCOPE, min_length=1, max_length=64)
+    use_memory: bool = True
+
+
+class MemoryTurnRequest(BaseModel):
+    role: str = Field(pattern=r"^(user|assistant|system)$")
+    content: str = Field(min_length=1, max_length=12000)
+    source_device: str = Field(
+        default="uri-windows",
+        pattern=r"^[A-Za-z0-9._-]{1,64}$",
+    )
+    memory_scope: str = Field(default=DEFAULT_SCOPE, min_length=1, max_length=64)
+
+
+class RememberRequest(BaseModel):
+    value: str = Field(min_length=1, max_length=4000)
+    key: str | None = Field(default=None, max_length=160)
+    source_device: str = Field(
+        default="uri-windows",
+        pattern=r"^[A-Za-z0-9._-]{1,64}$",
+    )
+    memory_scope: str = Field(default=DEFAULT_SCOPE, min_length=1, max_length=64)
+
+
+class MemoryContextRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=12000)
+    memory_scope: str = Field(default=DEFAULT_SCOPE, min_length=1, max_length=64)
+    fact_limit: int = Field(default=16, ge=1, le=50)
+    turn_limit: int = Field(default=8, ge=1, le=20)
+
+
+def _device_auth_or_401(device_id: str, authorization: str | None) -> None:
+    if not validate_device_token(device_id, authorization):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Device authentication required",
+        )
+
+
+def _system_with_memory(base: str | None, memory_prompt: str) -> str:
+    system_prompt = (base or DEFAULT_SYSTEM_PROMPT).strip()
+    if not memory_prompt:
+        return system_prompt
+
+    return (
+        system_prompt
+        + "\n\nJARVIS SHARED MEMORY (canonical Oracle context):\n"
+        + memory_prompt
+        + "\n\nUse this memory only when relevant. If it conflicts with the user's current "
+          "request, follow the current request. Do not claim a memory is newer than it is."
+    )
+
+
+async def _assistant_chat(
+    body: AssistantChatRequest,
+    *,
+    source_device: str,
+) -> dict:
+    gate = memory_store.process_user_text(
+        body.text,
+        source_device=source_device,
+        scope=body.memory_scope,
+        allow_auto=True,
+    )
+
+    # Hard secrets are not even copied into recent cross-device conversation.
+    # This prevents a password/PIN/API key from leaking into the SQLite history
+    # merely because the user accidentally phrased it as a memory request.
+    if gate.get("store_turn", True):
+        memory_store.record_turn(
+            "user",
+            body.text,
+            source_device=source_device,
+            scope=body.memory_scope,
+        )
+
+    direct_response = str(gate.get("direct_response") or "").strip()
+    if direct_response:
+        memory_store.record_turn(
+            "assistant",
+            direct_response,
+            source_device=source_device,
+            scope=body.memory_scope,
+        )
+        return {
+            "ok": True,
+            "provider": "memory-gate",
+            "model": "deterministic",
+            "text": direct_response,
+            "finish_reason": "stop",
+            "route": "memory",
+            "memory": {
+                "scope": body.memory_scope,
+                "gate": gate,
+                "facts_used": 0,
+                "turns_used": 0,
+            },
+            "source_device": source_device,
+        }
+
+    context = (
+        memory_store.context_for(
+            body.text,
+            scope=body.memory_scope,
+        )
+        if body.use_memory
+        else {"prompt": "", "facts": [], "turns": []}
+    )
+
+    try:
+        result = await route_reasoning(
+            text=body.text,
+            system_prompt=_system_with_memory(
+                body.system,
+                str(context.get("prompt") or ""),
+            ),
+            temperature=body.temperature,
+            max_tokens=body.max_tokens,
+            deep=body.deep,
+            route=body.route,
+        )
+    except (ReasoningError, ReasoningRouteError):
+        raise
+
+    answer = str(result.get("text") or "").strip()
+    if answer:
+        memory_store.record_turn(
+            "assistant",
+            answer,
+            source_device=source_device,
+            scope=body.memory_scope,
+        )
+
+    result["memory"] = {
+        "scope": body.memory_scope,
+        "gate": gate,
+        "facts_used": len(context.get("facts") or []),
+        "turns_used": len(context.get("turns") or []),
+    }
+    result["source_device"] = source_device
+    return result
+
+
 @app.get("/")
 def root():
     return {
@@ -137,6 +287,125 @@ def connected_devices(_: bool = Depends(require_auth)):
         "count": len(devices),
         "devices": devices,
     }
+
+
+@app.get("/api/v1/memory/health")
+def memory_health(_: bool = Depends(require_auth)):
+    return memory_store.health()
+
+
+@app.get("/api/v1/memory/snapshot")
+def memory_snapshot(
+    scope: str = Query(default=DEFAULT_SCOPE, min_length=1, max_length=64),
+    _: bool = Depends(require_auth),
+):
+    return memory_store.snapshot(scope=scope)
+
+
+@app.post("/api/v1/memory/remember")
+def memory_remember(
+    body: RememberRequest,
+    _: bool = Depends(require_auth),
+):
+    try:
+        remembered = memory_store.remember(
+            body.value,
+            source_device=body.source_device,
+            scope=body.memory_scope,
+            key=body.key,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return {"ok": True, "memory": remembered}
+
+
+@app.post("/api/v1/memory/context")
+def memory_context(
+    body: MemoryContextRequest,
+    _: bool = Depends(require_auth),
+):
+    context = memory_store.context_for(
+        body.query,
+        scope=body.memory_scope,
+        fact_limit=body.fact_limit,
+        turn_limit=body.turn_limit,
+    )
+    return {
+        "ok": True,
+        "scope": body.memory_scope,
+        "prompt": str(context.get("prompt") or ""),
+        "facts": context.get("facts") or [],
+        "turns": context.get("turns") or [],
+    }
+
+
+@app.post("/api/v1/memory/turn")
+def memory_turn(
+    body: MemoryTurnRequest,
+    _: bool = Depends(require_auth),
+):
+    gate = {"action": "none", "reason": "assistant_turn"}
+    if body.role == "user":
+        gate = memory_store.process_user_text(
+            body.content,
+            source_device=body.source_device,
+            scope=body.memory_scope,
+            allow_auto=True,
+        )
+
+    turn = None
+    if not (body.role == "user" and not gate.get("store_turn", True)):
+        turn = memory_store.record_turn(
+            body.role,
+            body.content,
+            source_device=body.source_device,
+            scope=body.memory_scope,
+        )
+
+    return {
+        "ok": True,
+        "turn": turn,
+        "gate": gate,
+    }
+
+
+@app.post("/api/v1/assistant/chat")
+async def assistant_chat(
+    body: AssistantChatRequest,
+    _: bool = Depends(require_auth),
+):
+    try:
+        return await _assistant_chat(
+            body,
+            source_device=body.source_device,
+        )
+    except (ReasoningError, ReasoningRouteError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+
+@app.post("/api/v1/device/{device_id}/assistant/chat")
+async def device_assistant_chat(
+    body: AssistantChatRequest,
+    device_id: str = Path(..., pattern=r"^[A-Za-z0-9._-]{1,64}$"),
+    authorization: str | None = Header(default=None),
+):
+    _device_auth_or_401(device_id, authorization)
+    try:
+        return await _assistant_chat(
+            body,
+            source_device=device_id,
+        )
+    except (ReasoningError, ReasoningRouteError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
 
 
 @app.get("/api/v1/reasoning/health")

@@ -68,17 +68,35 @@ class OpenAICompatibleProvider:
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
         model = self.resolve_model()
+
+        # V30 Phase 1: local Windows reasoning reads the same canonical Oracle
+        # memory as Samsung.  This is deliberately fail-open: if Oracle is
+        # unreachable, LM Studio continues with the original messages.
+        augmented_messages = messages
+        direct_memory_hit = False
+        try:
+            from cloud_client.memory_context import prepare_messages_with_oracle_memory
+
+            augmented_messages, direct_memory_hit = prepare_messages_with_oracle_memory(messages)
+        except Exception:
+            augmented_messages = messages
+            direct_memory_hit = False
+
         payload: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": augmented_messages,
             "temperature": float(temperature),
             "stream": False,
         }
 
         if max_tokens is not None:
             payload["max_tokens"] = int(max_tokens)
-        if tools:
-            payload["tools"] = tools
+        # A private recall question with a verified relevant Oracle-memory hit
+        # must be answered from memory, not accidentally routed to web search.
+        # All normal requests retain the full existing tool set.
+        effective_tools = None if direct_memory_hit else tools
+        if effective_tools:
+            payload["tools"] = effective_tools
             payload["tool_choice"] = "auto"
 
         req = urllib.request.Request(

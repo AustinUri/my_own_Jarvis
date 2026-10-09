@@ -73,6 +73,61 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="TALK TO JARVIS"
+            android:textColor="#FFCC78"
+            android:textStyle="bold"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/askText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="top"
+            android:hint="Ask JARVIS…"
+            android:inputType="textMultiLine"
+            android:maxLines="5"
+            android:minLines="2"
+            android:textColor="#EAFBFF"
+            android:textColorHint="#68808F" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/askButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="ASK JARVIS" />
+
+            <Button
+                android:id="@+id/voiceAskButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="TALK" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/jarvisReply"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="#0B1B27"
+            android:minHeight="96dp"
+            android:padding="14dp"
+            android:text="JARVIS replies will appear here."
+            android:textColor="#D9F7FF"
+            android:textIsSelectable="true" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:text="PHONE ACCESS"
             android:textColor="#8FEFFF"

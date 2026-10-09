@@ -132,3 +132,112 @@ class CloudApiClient:
             auth=True,
             timeout=wait + 5.0,
         )
+    def assistant_chat(
+        self,
+        text: str,
+        *,
+        source_device: str = DEFAULT_WINDOWS_DEVICE_ID,
+        memory_scope: str = "primary",
+        route: str = "auto",
+        deep: bool = False,
+        temperature: float = 0.2,
+        max_tokens: int = 500,
+        system: str | None = None,
+    ) -> dict:
+        payload = {
+            "text": text,
+            "source_device": source_device,
+            "memory_scope": memory_scope,
+            "route": route,
+            "deep": bool(deep),
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens),
+            "use_memory": True,
+        }
+        if system:
+            payload["system"] = system
+
+        return self._request(
+            "POST",
+            "/api/v1/assistant/chat",
+            payload,
+            auth=True,
+            timeout=180.0,
+        )
+
+    def memory_health(self) -> dict:
+        return self._request("GET", "/api/v1/memory/health", auth=True)
+
+    def memory_snapshot(self, scope: str = "primary") -> dict:
+        from urllib.parse import quote
+
+        return self._request(
+            "GET",
+            f"/api/v1/memory/snapshot?scope={quote(scope)}",
+            auth=True,
+        )
+
+    def memory_context(
+        self,
+        query: str,
+        *,
+        memory_scope: str = "primary",
+        fact_limit: int = 16,
+        turn_limit: int = 8,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/api/v1/memory/context",
+            {
+                "query": str(query or "").strip(),
+                "memory_scope": memory_scope,
+                "fact_limit": int(fact_limit),
+                "turn_limit": int(turn_limit),
+            },
+            auth=True,
+            timeout=min(self.timeout, 5.0),
+        )
+
+    def remember(
+        self,
+        value: str,
+        *,
+        key: str | None = None,
+        source_device: str = DEFAULT_WINDOWS_DEVICE_ID,
+        memory_scope: str = "primary",
+    ) -> dict:
+        payload = {
+            "value": value,
+            "source_device": source_device,
+            "memory_scope": memory_scope,
+        }
+        if key:
+            payload["key"] = key
+
+        return self._request(
+            "POST",
+            "/api/v1/memory/remember",
+            payload,
+            auth=True,
+        )
+
+    def record_memory_turn(
+        self,
+        role: str,
+        content: str,
+        *,
+        source_device: str = DEFAULT_WINDOWS_DEVICE_ID,
+        memory_scope: str = "primary",
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/api/v1/memory/turn",
+            {
+                "role": role,
+                "content": content,
+                "source_device": source_device,
+                "memory_scope": memory_scope,
+            },
+            auth=True,
+        )
+

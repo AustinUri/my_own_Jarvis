@@ -120,15 +120,35 @@ class WakeWordListener:
             # when the exception points at a packaged ONNX file, deletes that damaged
             # asset and asks OpenWakeWord to download a clean copy once.
             openwakeword.utils.download_models()
+
+            models_dir = (
+                Path(openwakeword.__file__).resolve().parent
+                / "resources"
+                / "models"
+            )
+
+            jarvis_model = models_dir / "hey_jarvis_v0.1.onnx"
+
+            if not jarvis_model.exists():
+                raise RuntimeError(
+                    f"Hey Jarvis ONNX model missing: {jarvis_model}"
+                )
+
+            model_kwargs = {
+                "wakeword_models": [str(jarvis_model)],
+                "inference_framework": "onnx",
+                "vad_threshold": self.vad_threshold,
+            }
+
             try:
-                model = Model(vad_threshold=self.vad_threshold)
+                model = Model(**model_kwargs)
             except Exception as first_exc:
                 repaired = self._repair_packaged_onnx(openwakeword, first_exc)
                 if not repaired:
                     raise
                 self._log('Wake model looked damaged; downloaded a fresh OpenWakeWord model copy.')
                 openwakeword.utils.download_models()
-                model = Model(vad_threshold=self.vad_threshold)
+                model = Model(**model_kwargs)
             blocksize = 1280  # 80 ms at 16 kHz
             device = resolve_input_device(self.mic_name)
             self._log(f'Wake word mic: {self.mic_name}')
