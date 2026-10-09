@@ -61,7 +61,7 @@ public final class JarvisForegroundService extends Service {
                                 "JARVIS V30"
                         )
                         .setContentText(
-                                "Connected to JARVIS Cloud"
+                                "Connected to Oracle Device Bus"
                         )
                         .setSmallIcon(
                                 android.R.drawable.stat_notify_sync

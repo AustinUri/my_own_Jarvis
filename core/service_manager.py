@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.user_paths import jarvis_data_dir
-from core.tailscale import run_tailscale, tailscale_executable
+from cloud_client.api import CloudApiClient
 
 
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -34,9 +34,14 @@ class ServiceManager:
             'model': 'unknown',
             'docker': 'unknown',
             'searxng': 'unknown',
-            'tailscale': 'unknown',
-            'phone_bridge': 'unknown',
+            'cloud_core': 'unknown',
+            'windows_device': 'unknown',
+            'samsung_device': 'unknown',
         }
+        self.cloud = CloudApiClient(
+            base_url=str(getattr(config, 'cloud_base_url', 'https://uri-jarvis.duckdns.org')),
+            timeout=float(getattr(config, 'cloud_request_timeout_seconds', 10.0)),
+        )
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -95,30 +100,35 @@ class ServiceManager:
         docker_ok = self._docker_ready()
         self._set('docker', 'online' if docker_ok else 'offline')
         self._set('searxng', 'online' if self._searxng_ready() else 'offline')
-        self._set('tailscale', 'online' if self._tailscale_ready() else ('missing' if not tailscale_executable() else 'offline'))
-        self._set('phone_bridge', 'online' if self._phone_bridge_ready() else 'offline')
+        self._refresh_cloud_status()
 
-
-    def _tailscale_ready(self) -> bool:
-        if not tailscale_executable():
-            return False
+    def _refresh_cloud_status(self) -> None:
         try:
-            result = run_tailscale(['status', '--json'], timeout=6)
-            if result.returncode != 0:
-                return False
-            data = json.loads(result.stdout or '{}')
-            backend = str(data.get('BackendState') or '').lower()
-            return backend in {'running', 'connected'} or bool((data.get('Self') or {}).get('Online'))
+            health = self.cloud.health()
+            cloud_online = bool(health.get('ok'))
         except Exception:
-            return False
+            cloud_online = False
 
-    def _phone_bridge_ready(self) -> bool:
+        self._set('cloud_core', 'online' if cloud_online else 'offline')
+
+        if not cloud_online:
+            self._set('windows_device', 'offline')
+            self._set('samsung_device', 'offline')
+            return
+
         try:
-            port = int(getattr(self.config, 'phone_bridge_port', 8766))
-            data = self._http_json(f'http://127.0.0.1:{port}/api/phone/health', timeout=2.0)
-            return isinstance(data, dict) and bool(data.get('ok'))
+            payload = self.cloud.list_devices()
+            rows = payload.get('devices') or []
+            connected = {str(row.get('device_id') or '') for row in rows if isinstance(row, dict)}
         except Exception:
-            return False
+            self._set('windows_device', 'auth-error')
+            self._set('samsung_device', 'auth-error')
+            return
+
+        windows_id = str(getattr(self.config, 'cloud_windows_device_id', 'uri-windows'))
+        phone_id = str(getattr(self.config, 'cloud_phone_device_id', 'uri-s25'))
+        self._set('windows_device', 'online' if windows_id in connected else 'offline')
+        self._set('samsung_device', 'online' if phone_id in connected else 'offline')
 
     def _http_json(self, url: str, timeout: float = 3.0):
         req = urllib.request.Request(url, headers={'User-Agent': 'JarvisLocalAssistant/27'})

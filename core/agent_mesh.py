@@ -28,7 +28,7 @@ _PROFILES = [
     AgentProfile("f1", "Formula 1", "sports", ("formula 1", "formula one", "f1", "grand prix")),
     AgentProfile("travel", "Travel", "personal", ("travel", "trip", "hotel", "flight", "train", "tour")),
     AgentProfile("calendar", "Calendar", "personal", ("calendar", "schedule", "appointment", "meeting")),
-    AgentProfile("phone", "Phone / Call Agent", "device", ("phone", "android", "samsung", "tailscale", "call", "dial", "contact")),
+    AgentProfile("phone", "Phone / Call Agent", "device", ("phone", "android", "samsung", "oracle", "cloud", "call", "dial", "contact")),
     AgentProfile("windows", "Windows", "device", ("windows", "desktop", "pc", "computer")),
     AgentProfile("surface", "Surface Manager", "ui", ("layout", "panel", "workspace", "bring up", "show me", "dock")),
     AgentProfile("vision", "Vision", "perception", ("camera", "see", "image", "photo", "look at"), True),

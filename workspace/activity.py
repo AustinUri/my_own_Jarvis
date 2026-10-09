@@ -87,8 +87,8 @@ class ActivityTimeline:
             if any(x in low for x in ("warning", "failed", "unavailable", "error")):
                 status = "warning"
             return self.add("web", "Web research", text, status=status, source="web")
-        if "phone" in low or "tailscale" in low:
-            status = "success" if any(x in low for x in ("paired", "connected", "ready", "serve configured")) else "info"
+        if "phone" in low or "oracle device" in low:
+            status = "success" if any(x in low for x in ("paired", "connected", "ready", "device bus")) else "info"
             if any(x in low for x in ("revoked", "failed", "error", "warning")):
                 status = "warning"
             return self.add("phone", "Phone link", text, status=status, source="phone")

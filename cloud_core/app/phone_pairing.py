@@ -135,6 +135,35 @@ def create_pairing_code(
     }
 
 
+@router.get("/devices")
+def paired_devices(
+    authorization: str | None = Header(default=None),
+):
+    if not bootstrap_ok(authorization):
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+        )
+
+    devices = load_devices()
+    rows = []
+
+    for device_id, record in devices.items():
+        if not isinstance(record, dict):
+            continue
+        rows.append({
+            "device_id": device_id,
+            "device_name": record.get("device_name") or device_id,
+            "platform": record.get("platform") or "unknown",
+            "paired_at": record.get("paired_at"),
+        })
+
+    return {
+        "count": len(rows),
+        "devices": rows,
+    }
+
+
 @router.post("/claim")
 def claim_pairing(request: PairRequest):
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import sys
 import threading
-import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -21,8 +20,7 @@ from workspace.tray import WorkspaceTray
 from workspace.activity import ActivityTimeline
 from vision.camera_state import CameraState
 from vision.hololab import run_visual_tests
-from phone.bridge import CompanionHub
-from phone.server import PhoneBridgeServer
+from phone.cloud_hub import CloudPhoneHub
 from core.agent_mesh import AgentMesh
 from core.resource_governor import ResourceGovernor
 from workspace.native_surface import NativeSurfaceController
@@ -31,7 +29,7 @@ from workspace.native_surface import NativeSurfaceController
 class CommandRouter(QObject):
     incoming = Signal(dict)
 
-    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CompanionHub, agent_mesh: AgentMesh, resource_governor: ResourceGovernor, surface_controller: NativeSurfaceController):
+    def __init__(self, bridge: WorkspaceBridge, camera_state: CameraState, publish, orchestrator: Orchestrator, phone_hub: CloudPhoneHub, agent_mesh: AgentMesh, resource_governor: ResourceGovernor, surface_controller: NativeSurfaceController):
         super().__init__()
         self.bridge = bridge
         self.camera_state = camera_state
@@ -146,34 +144,19 @@ class CommandRouter(QObject):
                 except Exception as exc:
                     self.publish('calendar_status', {'connected': False, 'source': 'none', 'message': str(exc)})
             self._thread(connect_calendar, 'jarvis-calendar-connect')
-        elif action == 'phone_prepare':
-            def prepare_phone():
-                result = self.phone_hub.prepare_private_transport()
-                self.publish('phone_transport', result)
-                self.publish('phone_status', self.phone_hub.status())
-            self._thread(prepare_phone, 'jarvis-phone-transport')
         elif action == 'phone_pair':
-            pairing = self.phone_hub.begin_pairing()
-            self.publish('phone_pairing', pairing)
-            self.publish('phone_status', self.phone_hub.status())
+            def pair_phone():
+                try:
+                    pairing = self.phone_hub.begin_pairing()
+                    self.publish('phone_pairing', pairing)
+                    self.publish('phone_status', self.phone_hub.status())
+                except Exception as exc:
+                    self.publish('phone_pairing', {"error": str(exc)})
+            self._thread(pair_phone, 'jarvis-cloud-phone-pair')
         elif action == 'phone_status':
-            self.publish('phone_status', self.phone_hub.status())
-        elif action == 'phone_device_info':
-            def phone_device_info():
-                try:
-                    result = self.phone_hub.request("device_info", {})
-                    self.publish('phone_diagnostics', {"phone_function": "device_info", "result": result})
-                except Exception as exc:
-                    self.publish('phone_diagnostics', {"phone_function": "device_info", "error": str(exc)})
-            self._thread(phone_device_info, 'jarvis-phone-device-info')
-        elif action == 'phone_battery':
-            def phone_battery():
-                try:
-                    result = self.phone_hub.request("battery_status", {})
-                    self.publish('phone_diagnostics', {"phone_function": "battery_status", "result": result})
-                except Exception as exc:
-                    self.publish('phone_diagnostics', {"phone_function": "battery_status", "error": str(exc)})
-            self._thread(phone_battery, 'jarvis-phone-battery')
+            def phone_status():
+                self.publish('phone_status', self.phone_hub.status())
+            self._thread(phone_status, 'jarvis-cloud-phone-status')
         elif action == 'phone_call_history':
             def phone_call_history():
                 try:
@@ -188,18 +171,7 @@ class CommandRouter(QObject):
                     })
                 except Exception as exc:
                     self.publish('phone_call_history', {"ok": False, "calls": [], "error": str(exc)})
-            self._thread(phone_call_history, 'jarvis-phone-call-history')
-        elif action == 'phone_diagnose':
-            def diagnose_phone():
-                result = self.phone_hub.diagnostics()
-                self.publish('phone_diagnostics', result)
-                self.publish('phone_status', self.phone_hub.status())
-            self._thread(diagnose_phone, 'jarvis-phone-diagnostics')
-        elif action == 'phone_revoke_all':
-            count = self.phone_hub.revoke_all()
-            self.publish('phone_pairing', {})
-            self.publish('phone_status', self.phone_hub.status())
-            self.publish('log', f'Revoked {count} paired phone(s).')
+            self._thread(phone_call_history, 'jarvis-cloud-phone-call-history')
         elif action == 'coding_status':
             self.publish('coding_status', self.orchestrator.tools.coding_service.status())
         elif action == 'coding_prepare':
@@ -252,14 +224,14 @@ def main(argv: list[str] | None = None) -> int:
         'transcript': '', 'response': '', 'responseLanguage': 'en', 'spoken': '',
         'logs': [], 'activity': [], 'error': '', 'dailyBriefing': orchestrator.tools.daily_briefing_service.cached(),
         'weather': {}, 'calendarStatus': orchestrator.tools.calendar_status_data(), 'calendarEvents': [],
-        'f1Lesson': {}, 'engineeringStatus': orchestrator.tools.engineering_learning_service.status(), 'codingStatus': orchestrator.tools.coding_service.status(), 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneTransport': {}, 'phoneDiagnostics': {}, 'phoneCallHistory': {'ok': False, 'calls': []}, 'agentMesh': {}, 'hololabResult': {}, 'surfaceStatus': {},
+        'f1Lesson': {}, 'engineeringStatus': orchestrator.tools.engineering_learning_service.status(), 'codingStatus': orchestrator.tools.coding_service.status(), 'serviceStatus': {}, 'phoneStatus': {}, 'phonePairing': {}, 'phoneCallHistory': {'ok': False, 'calls': []}, 'agentMesh': {}, 'hololabResult': {}, 'surfaceStatus': {},
     }
 
     server: WorkspaceServer | None = None
 
     def snapshot() -> dict:
         return {
-            'version': 29, 'build': '29.2',
+            'version': 30, 'build': '30.0-cloud',
             'runtime': dict(state),
             'config': asdict(config),
             'aiStatus': state.get('aiStatus', 'Checking AI provider…'),
@@ -274,8 +246,6 @@ def main(argv: list[str] | None = None) -> int:
             'serviceStatus': state.get('serviceStatus') or {},
             'phoneStatus': state.get('phoneStatus') or {},
             'phonePairing': state.get('phonePairing') or {},
-            'phoneTransport': state.get('phoneTransport') or {},
-            'phoneDiagnostics': state.get('phoneDiagnostics') or {},
             'phoneCallHistory': state.get('phoneCallHistory') or {'ok': False, 'calls': []},
             'agentMesh': state.get('agentMesh') or {},
             'hololabResult': state.get('hololabResult') or {},
@@ -294,8 +264,6 @@ def main(argv: list[str] | None = None) -> int:
         elif event_type == 'service_status': state['serviceStatus'] = payload
         elif event_type == 'phone_status': state['phoneStatus'] = payload
         elif event_type == 'phone_pairing': state['phonePairing'] = payload
-        elif event_type == 'phone_transport': state['phoneTransport'] = payload
-        elif event_type == 'phone_diagnostics': state['phoneDiagnostics'] = payload
         elif event_type == 'phone_call_history': state['phoneCallHistory'] = payload
         elif event_type == 'agent_mesh': state['agentMesh'] = payload
         elif event_type == 'hololab_result': state['hololabResult'] = payload
@@ -307,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     camera_state = CameraState()
     orchestrator.tools.set_camera_vision(lambda: camera_state.latest(), orchestrator.agent.analyze_camera_frame)
 
-    phone_hub = CompanionHub(config, log=lambda m: publish('log', m), status_callback=lambda data: publish('phone_status', data))
+    phone_hub = CloudPhoneHub(config, log=lambda m: publish('log', m), status_callback=lambda data: publish('phone_status', data))
     orchestrator.tools.set_phone_hub(phone_hub)
     state['phoneStatus'] = phone_hub.status()
     state['calendarStatus'] = orchestrator.tools.calendar_status_data()
@@ -422,43 +390,6 @@ def main(argv: list[str] | None = None) -> int:
     server_thread = threading.Thread(target=uvicorn_server.run, name='jarvis-workspace-server', daemon=True)
     server_thread.start()
 
-    # The companion API never binds to LAN/WAN interfaces. Tailscale Serve may
-    # proxy this localhost port over tailnet-only HTTPS after explicit setup.
-    def transcribe_phone_voice(audio: bytes, device: str) -> dict:
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
-                tmp.write(audio)
-                temp_path = Path(tmp.name)
-            transcript = orchestrator.whisper.transcribe(str(temp_path), command_mode=True).strip()
-            if not transcript:
-                return {'ok': False, 'error': 'JARVIS could not hear a usable voice command.', 'transcript': ''}
-            result = orchestrator.process_remote_text(transcript, source=f'phone:{device}')
-            if not isinstance(result, dict):
-                result = {'ok': True, 'text': str(result or ''), 'spoken_text': str(result or '')}
-            result = dict(result)
-            result.setdefault('ok', True)
-            result['transcript'] = transcript
-            return result
-        except Exception as exc:
-            return {'ok': False, 'error': f'Local phone voice transcription failed: {exc}', 'transcript': ''}
-        finally:
-            if temp_path is not None:
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-    phone_server = PhoneBridgeServer(
-        phone_hub,
-        ask_callback=lambda text, device: orchestrator.process_remote_text(text, source=f'phone:{device}'),
-        voice_callback=transcribe_phone_voice,
-    )
-    phone_uvicorn_config = uvicorn.Config(phone_server.app, host='127.0.0.1', port=int(getattr(config, 'phone_bridge_port', 8766)), log_level='warning')
-    phone_uvicorn_server = uvicorn.Server(phone_uvicorn_config)
-    phone_thread = threading.Thread(target=phone_uvicorn_server.run, name='jarvis-phone-bridge', daemon=True)
-    phone_thread.start()
-
     service_manager = ServiceManager(config, log=add_log, status_callback=lambda data: publish('service_status', data))
     service_manager.start()
 
@@ -468,7 +399,6 @@ def main(argv: list[str] | None = None) -> int:
         orchestrator.shutdown()
         config.save(config_path)
         uvicorn_server.should_exit = True
-        phone_uvicorn_server.should_exit = True
         app.quit()
 
     app.aboutToQuit.connect(orchestrator.shutdown)
@@ -488,7 +418,6 @@ def main(argv: list[str] | None = None) -> int:
     service_manager.stop()
     config.save(config_path)
     uvicorn_server.should_exit = True
-    phone_uvicorn_server.should_exit = True
     return exit_code
 
 

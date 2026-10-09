@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass
 class AppConfig:
-    config_version: int = 290
+    config_version: int = 300
 
     # AI / agent provider
     ai_provider: str = "LM Studio"
@@ -78,13 +78,12 @@ class AppConfig:
     google_calendar_client_secret_path: str = ""
 
 
-    # v26 secure phone companion foundation. The phone bridge itself listens only
-    # on localhost; remote access is expected to be provided by Tailscale Serve.
-    phone_bridge_enabled: bool = True
-    phone_bridge_port: int = 8766
-    phone_poll_timeout_seconds: float = 22.0
+    # V30 cloud/device foundation. PC and Samsung connect independently to Oracle.
+    cloud_base_url: str = "https://uri-jarvis.duckdns.org"
+    cloud_windows_device_id: str = "uri-windows"
+    cloud_phone_device_id: str = "uri-s25"
+    cloud_request_timeout_seconds: float = 10.0
     phone_command_timeout_seconds: float = 30.0
-    phone_pairing_minutes: int = 5
     prefer_phone_calendar: bool = True
     google_calendar_fallback_enabled: bool = True
 
@@ -124,8 +123,7 @@ class AppConfig:
     tts_sentence_pause_ms: int = 70
     tts_retry_once: bool = True
 
-    # v28 phone and spatial-vision behavior
-    phone_dns_fallback_enabled: bool = True
+    # v28 spatial-vision behavior
     hololab_enabled: bool = True
 
     # v29 local-first developer + phone-agent foundation. No cloud AI API keys
@@ -197,7 +195,6 @@ class AppConfig:
             # fan-out is throttled, and speech interruption is deferred until the
             # current sentence has completed.
             cfg.speech_finish_sentence_on_interrupt = True
-            cfg.phone_dns_fallback_enabled = True
             cfg.hololab_enabled = True
         if old_version < 281:
             # v28.1 hotfix: English-first STT avoids multilingual Whisper
@@ -232,6 +229,16 @@ class AppConfig:
             cfg.phone_contacts_enabled = True
             cfg.phone_calling_enabled = True
             cfg.aperture_enabled = False
+        if old_version < 300:
+            # V30 removes the PC-local phone transport. Both the
+            # Windows agent and Samsung companion are independent Oracle devices.
+            cfg.config_version = 300
+            if not str(getattr(cfg, "cloud_base_url", "")).strip():
+                cfg.cloud_base_url = "https://uri-jarvis.duckdns.org"
+            if not str(getattr(cfg, "cloud_windows_device_id", "")).strip():
+                cfg.cloud_windows_device_id = "uri-windows"
+            if not str(getattr(cfg, "cloud_phone_device_id", "")).strip():
+                cfg.cloud_phone_device_id = "uri-s25"
         if not str(cfg.searxng_base_url).strip():
             cfg.searxng_base_url = "http://localhost:8888"
         if not str(cfg.ai_base_url).strip():
