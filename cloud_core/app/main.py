@@ -20,6 +20,7 @@ from fastapi import (
 )
 
 from .device_bus import device_manager
+from .device_events import device_event_store
 from .phone_pairing import (
     router as phone_pairing_router,
     validate_device_token,
@@ -488,6 +489,23 @@ async def run_device_job(
         ) from exc
 
 
+@app.get("/api/v1/devices/{device_id}/events")
+async def recent_device_events(
+    device_id: str,
+    limit: int = 20,
+    _: bool = Depends(require_auth),
+):
+    safe_limit = max(1, min(int(limit), 100))
+
+    return {
+        "device_id": device_id,
+        "events": device_event_store.recent(
+            device_id,
+            limit=safe_limit,
+        ),
+    }
+
+
 @app.websocket("/api/v1/ws/{device_id}")
 async def device_socket(
     websocket: WebSocket,
@@ -527,6 +545,34 @@ async def device_socket(
                     payload = json.loads(message)
                 except json.JSONDecodeError:
                     payload = None
+
+                if (
+                    isinstance(payload, dict)
+                    and payload.get("type") == "device_event"
+                ):
+                    event_type = str(
+                        payload.get("event_type") or ""
+                    ).strip()
+
+                    if event_type:
+                        event_payload = payload.get("payload")
+
+                        if not isinstance(event_payload, dict):
+                            event_payload = {}
+
+                        device_event_store.record(
+                            device_id=device_id,
+                            event_type=event_type,
+                            payload=event_payload,
+                            event_id=str(
+                                payload.get("event_id") or ""
+                            ).strip() or None,
+                            occurred_at=str(
+                                payload.get("occurred_at") or ""
+                            ).strip() or None,
+                        )
+
+                    continue
 
                 if (
                     isinstance(payload, dict)

@@ -269,6 +269,7 @@ public final class MainActivity extends Activity {
         addIfMissing(wanted, Manifest.permission.CALL_PHONE);
         addIfMissing(wanted, Manifest.permission.RECORD_AUDIO);
         addIfMissing(wanted, Manifest.permission.READ_CALL_LOG);
+        addIfMissing(wanted, Manifest.permission.READ_PHONE_STATE);
 
         if (Build.VERSION.SDK_INT >= 33) {
             addIfMissing(wanted, Manifest.permission.POST_NOTIFICATIONS);

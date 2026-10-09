@@ -21,6 +21,9 @@ import okhttp3.WebSocketListener;
 
 public final class JarvisForegroundService extends Service {
 
+    public static final String ACTION_PHONE_STATE_EVENT =
+            "com.jarvis.companion.PHONE_STATE_EVENT";
+
     public static final String CHANNEL =
             "jarvis_cloud_link";
 
@@ -91,6 +94,11 @@ public final class JarvisForegroundService extends Service {
             connect();
         }
 
+        if (intent != null
+                && ACTION_PHONE_STATE_EVENT.equals(intent.getAction())) {
+            sendPhoneStateEvent(intent);
+        }
+
         return START_STICKY;
     }
 
@@ -148,6 +156,7 @@ public final class JarvisForegroundService extends Service {
                                     .apply();
 
                             webSocket.send("ping");
+                            flushQueuedDeviceEvents(webSocket);
                         }
 
                         @Override
@@ -478,6 +487,194 @@ public final class JarvisForegroundService extends Service {
                         "Unsupported phone job: "
                                 + jobType
                 );
+        }
+    }
+
+
+    private void sendPhoneStateEvent(Intent intent) {
+        try {
+            JSONObject payload = new JSONObject();
+
+            payload.put("state",
+                    intent.getStringExtra("call_state"));
+
+            payload.put("direction",
+                    intent.getStringExtra("call_direction"));
+
+            payload.put("number",
+                    intent.getStringExtra("call_number"));
+
+            payload.put("caller_name",
+                    intent.getStringExtra("caller_name"));
+
+            payload.put(
+                    "occurred_at_ms",
+                    intent.getLongExtra(
+                            "occurred_at_ms",
+                            System.currentTimeMillis()
+                    )
+            );
+
+            JSONObject event = new JSONObject();
+
+            event.put("type", "device_event");
+            event.put("event_type", "phone.call_state");
+
+            event.put(
+                    "event_id",
+                    java.util.UUID.randomUUID()
+                            .toString()
+                            .replace("-", "")
+            );
+
+            event.put(
+                    "occurred_at",
+                    java.time.Instant.now().toString()
+            );
+
+            event.put("payload", payload);
+
+            sendOrQueueDeviceEvent(event);
+
+        } catch (Exception ignored) {
+        }
+    }
+
+
+    private synchronized void sendOrQueueDeviceEvent(
+            JSONObject event
+    ) {
+
+        if (event == null) return;
+
+        WebSocket current = socket;
+
+        if (current != null) {
+            try {
+                if (current.send(event.toString())) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        try {
+            String old =
+                    getSharedPreferences(
+                            PhoneApiClient.PREFS,
+                            MODE_PRIVATE
+                    )
+                    .getString(
+                            "phase2_pending_device_events",
+                            "[]"
+                    );
+
+            org.json.JSONArray existing;
+
+            try {
+                existing =
+                        new org.json.JSONArray(old);
+            } catch (Exception ignored) {
+                existing =
+                        new org.json.JSONArray();
+            }
+
+            org.json.JSONArray compact =
+                    new org.json.JSONArray();
+
+            int start =
+                    Math.max(
+                            0,
+                            existing.length() - 19
+                    );
+
+            for (
+                    int i = start;
+                    i < existing.length();
+                    i++
+            ) {
+                compact.put(existing.opt(i));
+            }
+
+            compact.put(event);
+
+            getSharedPreferences(
+                    PhoneApiClient.PREFS,
+                    MODE_PRIVATE
+            )
+                    .edit()
+                    .putString(
+                            "phase2_pending_device_events",
+                            compact.toString()
+                    )
+                    .apply();
+
+        } catch (Exception ignored) {
+        }
+    }
+
+
+    private synchronized void flushQueuedDeviceEvents(
+            WebSocket webSocket
+    ) {
+
+        if (webSocket == null) return;
+
+        try {
+            String old =
+                    getSharedPreferences(
+                            PhoneApiClient.PREFS,
+                            MODE_PRIVATE
+                    )
+                    .getString(
+                            "phase2_pending_device_events",
+                            "[]"
+                    );
+
+            org.json.JSONArray existing =
+                    new org.json.JSONArray(old);
+
+            org.json.JSONArray remaining =
+                    new org.json.JSONArray();
+
+            for (
+                    int i = 0;
+                    i < existing.length();
+                    i++
+            ) {
+                Object value =
+                        existing.opt(i);
+
+                if (!(value instanceof JSONObject)) {
+                    continue;
+                }
+
+                boolean sent = false;
+
+                try {
+                    sent = webSocket.send(
+                            value.toString()
+                    );
+                } catch (Exception ignored) {
+                }
+
+                if (!sent) {
+                    remaining.put(value);
+                }
+            }
+
+            getSharedPreferences(
+                    PhoneApiClient.PREFS,
+                    MODE_PRIVATE
+            )
+                    .edit()
+                    .putString(
+                            "phase2_pending_device_events",
+                            remaining.toString()
+                    )
+                    .apply();
+
+        } catch (Exception ignored) {
         }
     }
 
