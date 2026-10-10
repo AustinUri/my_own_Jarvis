@@ -530,6 +530,11 @@ public final class JarvisForegroundService extends Service {
 
                 pendingCallerName = "";
                 pendingCallerNumber = "";
+
+                // End of this call session. Allow the same caller to be
+                // announced immediately if they start a new call.
+                lastAnnouncedCallKey = "";
+                lastAnnouncedCallAtMs = 0L;
             }
 
             return;
