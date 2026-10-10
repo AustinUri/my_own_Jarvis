@@ -509,6 +509,25 @@ public final class JarvisForegroundService extends Service {
     }
 
 
+    private boolean shouldSpeakIncomingCall() {
+        try {
+            android.media.AudioManager audioManager =
+                    (android.media.AudioManager)
+                            getSystemService(AUDIO_SERVICE);
+
+            if (audioManager == null) {
+                return true;
+            }
+
+            return audioManager.getRingerMode()
+                    == android.media.AudioManager.RINGER_MODE_NORMAL;
+
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+
     private void handleLiveCallReaction(Intent intent) {
 
         String state =
@@ -537,6 +556,22 @@ public final class JarvisForegroundService extends Service {
                 lastAnnouncedCallAtMs = 0L;
             }
 
+            return;
+        }
+
+        // Respect the phone's own sound mode.
+        // Silent/Vibrate: do not speak locally.
+        // The call event has already been sent to Oracle above.
+        if (!shouldSpeakIncomingCall()) {
+            if (pendingCallAnnouncement != null) {
+                callReactionHandler.removeCallbacks(
+                        pendingCallAnnouncement
+                );
+                pendingCallAnnouncement = null;
+            }
+
+            pendingCallerName = "";
+            pendingCallerNumber = "";
             return;
         }
 
