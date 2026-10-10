@@ -33,6 +33,23 @@ public final class JarvisForegroundService extends Service {
 
     private WebSocket socket;
 
+    // PHASE_2_2_LIVE_CALL_REACTION
+    private android.speech.tts.TextToSpeech callTts;
+    private volatile boolean callTtsReady = false;
+    private volatile String pendingCallSpeech = null;
+
+    private final android.os.Handler callReactionHandler =
+            new android.os.Handler(
+                    android.os.Looper.getMainLooper()
+            );
+
+    private Runnable pendingCallAnnouncement;
+    private String pendingCallerName = "";
+    private String pendingCallerNumber = "";
+    private String lastAnnouncedCallKey = "";
+    private long lastAnnouncedCallAtMs = 0L;
+
+
     private final OkHttpClient client =
             new OkHttpClient.Builder()
                     .pingInterval(
@@ -97,6 +114,7 @@ public final class JarvisForegroundService extends Service {
         if (intent != null
                 && ACTION_PHONE_STATE_EVENT.equals(intent.getAction())) {
             sendPhoneStateEvent(intent);
+                    handleLiveCallReaction(intent);
         }
 
         return START_STICKY;
@@ -491,6 +509,245 @@ public final class JarvisForegroundService extends Service {
     }
 
 
+    private void handleLiveCallReaction(Intent intent) {
+
+        String state =
+                cleanCallValue(
+                        intent.getStringExtra("call_state")
+                );
+
+        if (!"ringing".equalsIgnoreCase(state)) {
+
+            if ("idle".equalsIgnoreCase(state)
+                    || "offhook".equalsIgnoreCase(state)) {
+
+                if (pendingCallAnnouncement != null) {
+                    callReactionHandler.removeCallbacks(
+                            pendingCallAnnouncement
+                    );
+                    pendingCallAnnouncement = null;
+                }
+
+                pendingCallerName = "";
+                pendingCallerNumber = "";
+            }
+
+            return;
+        }
+
+        String callerName =
+                cleanCallValue(
+                        intent.getStringExtra("caller_name")
+                );
+
+        String number =
+                cleanCallValue(
+                        intent.getStringExtra("call_number")
+                );
+
+        if (!callerName.isEmpty()) {
+            pendingCallerName = callerName;
+        }
+
+        if (!number.isEmpty()) {
+            pendingCallerNumber = number;
+        }
+
+        if (pendingCallAnnouncement != null) {
+            callReactionHandler.removeCallbacks(
+                    pendingCallAnnouncement
+            );
+        }
+
+        pendingCallAnnouncement = () -> {
+            pendingCallAnnouncement = null;
+
+            String name = pendingCallerName;
+            String phone = pendingCallerNumber;
+
+            String key =
+                    (!name.isEmpty() ? name : phone);
+
+            if (key.isEmpty()) {
+                key = "unknown";
+            }
+
+            long now =
+                    System.currentTimeMillis();
+
+            if (key.equals(lastAnnouncedCallKey)
+                    && now - lastAnnouncedCallAtMs < 20000L) {
+                return;
+            }
+
+            lastAnnouncedCallKey = key;
+            lastAnnouncedCallAtMs = now;
+
+            String speech;
+
+            if (!name.isEmpty()) {
+                speech =
+                        "Sir, " +
+                        name +
+                        " is calling.";
+
+            } else if (!phone.isEmpty()) {
+                speech =
+                        "Sir, you have an incoming call from " +
+                        speakablePhoneNumber(phone) +
+                        ".";
+
+            } else {
+                speech =
+                        "Sir, you have an incoming call.";
+            }
+
+            speakIncomingCall(speech);
+        };
+
+        callReactionHandler.postDelayed(
+                pendingCallAnnouncement,
+                650L
+        );
+    }
+
+
+    private String cleanCallValue(String value) {
+
+        if (value == null) {
+            return "";
+        }
+
+        String cleaned =
+                value.trim();
+
+        if ("null".equalsIgnoreCase(cleaned)
+                || "unknown".equalsIgnoreCase(cleaned)) {
+            return "";
+        }
+
+        return cleaned;
+    }
+
+
+    private String speakablePhoneNumber(String number) {
+
+        if (number == null || number.isBlank()) {
+            return "";
+        }
+
+        StringBuilder out =
+                new StringBuilder();
+
+        for (int i = 0; i < number.length(); i++) {
+
+            char c =
+                    number.charAt(i);
+
+            if (Character.isDigit(c)) {
+
+                if (out.length() > 0) {
+                    out.append(' ');
+                }
+
+                out.append(c);
+            }
+        }
+
+        return out.length() > 0
+                ? out.toString()
+                : number;
+    }
+
+
+    private synchronized void speakIncomingCall(
+            String speech
+    ) {
+
+        if (speech == null || speech.isBlank()) {
+            return;
+        }
+
+        pendingCallSpeech =
+                speech;
+
+        if (callTts != null && callTtsReady) {
+            speakPendingCallNow();
+            return;
+        }
+
+        if (callTts != null) {
+            return;
+        }
+
+        callTts =
+                new android.speech.tts.TextToSpeech(
+                        getApplicationContext(),
+                        status -> {
+
+                            if (status
+                                    != android.speech.tts.TextToSpeech.SUCCESS) {
+
+                                callTtsReady = false;
+                                return;
+                            }
+
+                            callTtsReady = true;
+
+                            try {
+                                callTts.setLanguage(
+                                        java.util.Locale.getDefault()
+                                );
+
+                                callTts.setAudioAttributes(
+                                        new android.media.AudioAttributes.Builder()
+                                                .setUsage(
+                                                        android.media.AudioAttributes
+                                                                .USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+                                                )
+                                                .setContentType(
+                                                        android.media.AudioAttributes
+                                                                .CONTENT_TYPE_SPEECH
+                                                )
+                                                .build()
+                                );
+
+                            } catch (Exception ignored) {
+                            }
+
+                            speakPendingCallNow();
+                        }
+                );
+    }
+
+
+    private synchronized void speakPendingCallNow() {
+
+        if (!callTtsReady
+                || callTts == null
+                || pendingCallSpeech == null
+                || pendingCallSpeech.isBlank()) {
+            return;
+        }
+
+        String speech =
+                pendingCallSpeech;
+
+        pendingCallSpeech =
+                null;
+
+        try {
+            callTts.speak(
+                    speech,
+                    android.speech.tts.TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "jarvis-incoming-call"
+            );
+        } catch (Exception ignored) {
+        }
+    }
+
+
     private void sendPhoneStateEvent(Intent intent) {
         try {
             JSONObject payload = new JSONObject();
@@ -712,6 +969,20 @@ public final class JarvisForegroundService extends Service {
 
     @Override
     public void onDestroy() {
+
+
+        callReactionHandler.removeCallbacksAndMessages(null);
+
+        if (callTts != null) {
+            try {
+                callTts.stop();
+                callTts.shutdown();
+            } catch (Exception ignored) {
+            }
+
+            callTts = null;
+            callTtsReady = false;
+        }
 
         running = false;
 
