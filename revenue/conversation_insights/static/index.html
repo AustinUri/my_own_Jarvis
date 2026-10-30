@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Conversation Insights</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="brand-dot"></span><span>Conversation Insights</span></div>
+  <label class="language"><span id="languageLabel">שפה</span><select id="languageMode"></select></label>
+</header>
+
+<main class="page">
+  <section class="hero">
+    <div class="kicker" id="kicker">JARVIS / בין השורות</div>
+    <h1 id="heroTitle">מה באמת קורה בשיחה הזאת?</h1>
+    <p id="heroText">מעלים ייצוא של WhatsApp, מסמנים מי אתם ומה סוג הקשר, ומתחילים מהעובדות שהשיחה עצמה מוכיחה.</p>
+  </section>
+
+  <section class="upload-block" id="uploadBlock">
+    <div class="section-num">01</div>
+    <h2 id="uploadTitle">העלאת השיחה</h2>
+    <label class="file-picker">
+      <input id="file" type="file" accept=".zip,.txt">
+      <span><b id="chooseFile">בחרו ZIP או TXT</b><small id="fileHint">הצ׳אט הגולמי לא נשמר</small></span>
+      <em id="limitText">...</em>
+    </label>
+    <button class="black-btn" id="uploadBtn">קריאת השיחה</button>
+    <div class="status" id="uploadStatus"></div>
+  </section>
+
+  <section class="setup hidden" id="setupBlock">
+    <div class="section-num">02</div>
+    <h2 id="setupTitle">מי נמצא בשיחה?</h2>
+    <p class="section-copy" id="setupCopy">אפשר לשנות את השם שיופיע בדוח בלי לשנות את הייצוא המקורי.</p>
+    <div id="participants"></div>
+
+    <label class="field">
+      <span id="otherPersonLabel">האדם המרכזי מולך</span>
+      <select id="otherParticipant"></select>
+    </label>
+
+    <label class="field">
+      <span id="relationshipLabel">סוג הקשר</span>
+      <select id="relationshipType"></select>
+    </label>
+
+    <label class="field hidden" id="relationshipDescriptionWrap">
+      <span id="relationshipDescriptionLabel">תארו את הקשר</span>
+      <input id="relationshipDescription" maxlength="500">
+    </label>
+
+    <label class="field">
+      <span id="goalLabel">מה אתם רוצים להבין?</span>
+      <textarea id="goal" maxlength="1000"></textarea>
+    </label>
+
+    <button class="black-btn" id="analyzeBtn">יצירת דוח 1 החינמי</button>
+    <div class="status" id="analyzeStatus"></div>
+  </section>
+
+  <section class="report hidden" id="reportBlock">
+    <section class="numbers" id="numbersBlock">
+      <div class="numbers-stage">
+        <div class="section-num">03</div>
+        <div class="numbers-head">
+          <h3 id="numbersTitle">המספרים</h3>
+          <p id="numbersIntro">קודם העובדות. אחר כך הסיפור.</p>
+        </div>
+      </div>
+      <section class="activity-card">
+        <div class="activity-head">
+          <div>
+            <div class="card-title" id="activityTitle">מפת פעילות יומית</div>
+            <div class="card-sub" id="activityRange"></div>
+          </div>
+          <div class="heat-legend"><span id="heatLow">פחות</span><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i><span id="heatHigh">יותר</span></div>
+        </div>
+        <div id="heatMonths" class="heat-months"></div>
+        <div class="heat-wrap">
+          <div id="heatWeekdays" class="heat-weekdays"></div>
+          <div id="calendarHeat" class="heat"></div>
+        </div>
+      </section>
+      <div id="numberCards"></div>
+      <div class="hour-card">
+        <div class="card-title" id="hourTitle">לפי שעה</div>
+        <div id="hours" class="hours"></div>
+        <div id="hourTicks" class="hour-ticks"></div>
+        <div id="hourFoot" class="card-foot"></div>
+      </div>
+    </section>
+
+    <div class="report-separator"></div>
+
+    <div class="report-head">
+      <div class="section-num">04</div>
+      <div>
+        <div class="report-label" id="reportLabel">דוח 1 · חינם</div>
+        <h2 id="reportTitle"></h2>
+        <p class="report-subtitle" id="reportSubtitle"></p>
+      </div>
+    </div>
+
+    <article class="editorial" id="reportBody"></article>
+    <div id="highlights"></div>
+
+    <section class="full-report">
+      <div>
+        <span class="full-kicker" id="fullKicker">השלב הבא</span>
+        <h3 id="fullTitle">הדוח המלא</h3>
+        <p id="fullText">ניתוח מעמיק יותר של הדינמיקה, נקודות המפנה והדפוסים שחוזרים לאורך הקשר.</p>
+      </div>
+      <button class="black-btn ghosted" disabled id="fullBtn">בקרוב</button>
+    </section>
+  </section>
+</main>
+
+<footer><span>Conversation Insights</span><span id="privacyFoot">המידע שלכם נשאר בשליטתכם</span></footer>
+<script src="/static/app.js?v=055"></script>
+</body>
+</html>
