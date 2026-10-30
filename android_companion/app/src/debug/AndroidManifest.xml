@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+
+        <!-- Retire the old Pairing/Connection screen as the launcher.
+             It remains available internally as Advanced diagnostics. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            tools:node="replace" />
+
+        <!-- One normal JARVIS app launcher. -->
+        <activity
+            android:name=".JarvisHomeActivity"
+            android:exported="true"
+            android:label="JARVIS">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>
