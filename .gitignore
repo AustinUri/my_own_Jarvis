@@ -84,3 +84,18 @@ android_companion/app/build/
 
 # Android Gradle generated files
 android_companion/.gradle/
+
+# JARVIS local/runtime artifacts
+backups/
+**/__pycache__/
+*.pyc
+*.pyo
+*.sqlite3
+*.db
+.env
+.env.*
+!.env.example
+
+# Revenue Track generated installer payloads
+payload/
+APPLY_V30_REVENUE_MVP_*.ps1
