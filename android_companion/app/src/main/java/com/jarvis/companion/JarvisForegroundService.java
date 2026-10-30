@@ -24,6 +24,9 @@ public final class JarvisForegroundService extends Service {
     public static final String ACTION_PHONE_STATE_EVENT =
             "com.jarvis.companion.PHONE_STATE_EVENT";
 
+    public static final String ACTION_WHATSAPP_CALL_EVENT =
+            "com.jarvis.companion.WHATSAPP_CALL_EVENT";
+
     public static final String CHANNEL =
             "jarvis_cloud_link";
 
@@ -114,7 +117,12 @@ public final class JarvisForegroundService extends Service {
         if (intent != null
                 && ACTION_PHONE_STATE_EVENT.equals(intent.getAction())) {
             sendPhoneStateEvent(intent);
-                    handleLiveCallReaction(intent);
+                    handleLiveCallReaction(intent, false);
+        }
+
+        if (intent != null
+                && ACTION_WHATSAPP_CALL_EVENT.equals(intent.getAction())) {
+            handleLiveCallReaction(intent, true);
         }
 
         return START_STICKY;
@@ -196,6 +204,11 @@ public final class JarvisForegroundService extends Service {
 
                                 if ("welcome".equals(type)) {
                                     webSocket.send("ping");
+                                    return;
+                                }
+
+                                if ("caller_intelligence_result".equals(type)) {
+                                    handleCallerIntelligenceResult(message);
                                     return;
                                 }
 
@@ -389,7 +402,12 @@ public final class JarvisForegroundService extends Service {
                         false
                 );
 
-                return out;
+                                out.put(
+                        "reminder_alarm",
+                        true
+                );
+
+return out;
 
 
             case "phone.calendar_upcoming":
@@ -499,6 +517,105 @@ public final class JarvisForegroundService extends Service {
                 );
 
 
+            case "phone.alarm_set": {
+
+                int hour =
+                        payload.optInt(
+                                "hour",
+                                -1
+                        );
+
+                int minute =
+                        payload.optInt(
+                                "minute",
+                                -1
+                        );
+
+                String reminderMessage =
+                        payload.optString(
+                                "message",
+                                ""
+                        ).trim();
+
+                if (hour < 0 || hour > 23) {
+                    throw new IllegalArgumentException(
+                            "hour must be 0-23"
+                    );
+                }
+
+                if (minute < 0 || minute > 59) {
+                    throw new IllegalArgumentException(
+                            "minute must be 0-59"
+                    );
+                }
+
+                if (reminderMessage.isEmpty()) {
+                    reminderMessage =
+                            "JARVIS reminder";
+                }
+
+                Intent alarmIntent =
+                        new Intent(
+                                android.provider.AlarmClock
+                                        .ACTION_SET_ALARM
+                        );
+
+                alarmIntent.putExtra(
+                        android.provider.AlarmClock
+                                .EXTRA_HOUR,
+                        hour
+                );
+
+                alarmIntent.putExtra(
+                        android.provider.AlarmClock
+                                .EXTRA_MINUTES,
+                        minute
+                );
+
+                alarmIntent.putExtra(
+                        android.provider.AlarmClock
+                                .EXTRA_MESSAGE,
+                        reminderMessage
+                );
+
+                alarmIntent.putExtra(
+                        android.provider.AlarmClock
+                                .EXTRA_SKIP_UI,
+                        true
+                );
+
+                alarmIntent.addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                );
+
+                if (
+                        alarmIntent.resolveActivity(
+                                getPackageManager()
+                        ) == null
+                ) {
+                    throw new IllegalStateException(
+                            "No alarm clock app available"
+                    );
+                }
+
+                startActivity(alarmIntent);
+
+                out.put("ok", true);
+                out.put(
+                        "provider",
+                        "android_alarm_clock"
+                );
+                out.put(
+                        "message",
+                        reminderMessage
+                );
+                out.put("hour", hour);
+                out.put("minute", minute);
+
+                return out;
+            }
+
+
             default:
 
                 throw new IllegalArgumentException(
@@ -506,6 +623,144 @@ public final class JarvisForegroundService extends Service {
                                 + jobType
                 );
         }
+    }
+
+
+    private void handleCallerIntelligenceResult(
+            JSONObject message
+    ) {
+        try {
+            final String learnedName =
+                    cleanCallValue(
+                            message.optString(
+                                    "display_name",
+                                    ""
+                            )
+                    );
+
+            final String learnedNumber =
+                    cleanCallValue(
+                            message.optString(
+                                    "number",
+                                    ""
+                            )
+                    );
+
+            if (learnedName.isEmpty()
+                    || learnedNumber.isEmpty()) {
+                return;
+            }
+
+            callReactionHandler.post(() -> {
+
+                // If there is no pending announcement, the call
+                // already ended, was already announced, or the
+                // phone is Silent/Vibrate.
+                if (pendingCallAnnouncement == null) {
+                    return;
+                }
+
+                if (!shouldSpeakIncomingCall()) {
+                    return;
+                }
+
+                String currentNumber =
+                        cleanCallValue(
+                                pendingCallerNumber
+                        );
+
+                if (currentNumber.isEmpty()
+                        || !sameIncomingPhoneNumber(
+                                currentNumber,
+                                learnedNumber
+                        )) {
+                    return;
+                }
+
+                // The pending announcement reads this field
+                // when it actually speaks.
+                pendingCallerName = learnedName;
+            });
+
+        } catch (Exception ignored) {
+        }
+    }
+
+
+    private boolean sameIncomingPhoneNumber(
+            String first,
+            String second
+    ) {
+        String a = phoneDigitsOnly(first);
+        String b = phoneDigitsOnly(second);
+
+        if (a.isEmpty() || b.isEmpty()) {
+            return false;
+        }
+
+        if (a.equals(b)) {
+            return true;
+        }
+
+        int suffixLength =
+                Math.min(
+                        9,
+                        Math.min(
+                                a.length(),
+                                b.length()
+                        )
+                );
+
+        if (suffixLength < 7) {
+            return false;
+        }
+
+        return a.substring(
+                a.length() - suffixLength
+        ).equals(
+                b.substring(
+                        b.length() - suffixLength
+                )
+        );
+    }
+
+
+    private String phoneDigitsOnly(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        StringBuilder out =
+                new StringBuilder();
+
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+
+            if (Character.isDigit(c)) {
+                out.append(c);
+            }
+        }
+
+        return out.toString();
+    }
+
+
+    private boolean containsHebrew(String value) {
+
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+
+            if ((c >= '\u0590' && c <= '\u05FF')
+                    || (c >= '\uFB1D' && c <= '\uFB4F')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 
@@ -528,7 +783,7 @@ public final class JarvisForegroundService extends Service {
     }
 
 
-    private void handleLiveCallReaction(Intent intent) {
+    private void handleLiveCallReaction(Intent intent, boolean fromWhatsApp) {
 
         String state =
                 cleanCallValue(
@@ -625,11 +880,33 @@ public final class JarvisForegroundService extends Service {
 
             String speech;
 
-            if (!name.isEmpty()) {
-                speech =
-                        "Sir, " +
-                        name +
-                        " is calling.";
+            if (fromWhatsApp && !name.isEmpty()) {
+
+                if (containsHebrew(name)) {
+                    speech =
+                            "?????, ???? ?????? ????? ?-" +
+                            name +
+                            ".";
+                } else {
+                    speech =
+                            "Sir, " +
+                            name +
+                            " is calling you on WhatsApp.";
+                }
+
+            } else if (!name.isEmpty()) {
+
+                if (containsHebrew(name)) {
+                    speech =
+                            "?????, " +
+                            name +
+                            " ????? ????.";
+                } else {
+                    speech =
+                            "Sir, " +
+                            name +
+                            " is calling.";
+                }
 
             } else if (!phone.isEmpty()) {
                 speech =
@@ -645,9 +922,14 @@ public final class JarvisForegroundService extends Service {
             speakIncomingCall(speech);
         };
 
+        long announcementDelayMs =
+                pendingCallerName.isEmpty()
+                        ? 1200L
+                        : 650L;
+
         callReactionHandler.postDelayed(
                 pendingCallAnnouncement,
-                650L
+                announcementDelayMs
         );
     }
 
@@ -777,6 +1059,28 @@ public final class JarvisForegroundService extends Service {
                 null;
 
         try {
+            java.util.Locale speechLocale =
+                    containsHebrew(speech)
+                            ? new java.util.Locale("he", "IL")
+                            : java.util.Locale.ENGLISH;
+
+            int languageResult =
+                    callTts.setLanguage(
+                            speechLocale
+                    );
+
+            if (languageResult
+                    == android.speech.tts.TextToSpeech.LANG_MISSING_DATA
+                    || languageResult
+                    == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
+
+                // Do not change the phone UI language.
+                // Fall back only for this spoken message.
+                callTts.setLanguage(
+                        java.util.Locale.getDefault()
+                );
+            }
+
             callTts.speak(
                     speech,
                     android.speech.tts.TextToSpeech.QUEUE_FLUSH,

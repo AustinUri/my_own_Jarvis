@@ -21,6 +21,7 @@ from fastapi import (
 
 from .device_bus import device_manager
 from .device_events import device_event_store
+from .caller_intelligence import CallerIntelligence
 from .phone_pairing import (
     router as phone_pairing_router,
     validate_device_token,
@@ -42,6 +43,9 @@ app = FastAPI(
     title="JARVIS Cloud Core",
     version="30.0-alpha"
 )
+
+
+caller_intelligence = CallerIntelligence()
 
 
 def token_is_valid(authorization: str | None) -> bool:
@@ -571,6 +575,117 @@ async def device_socket(
                                 payload.get("occurred_at") or ""
                             ).strip() or None,
                         )
+
+                        # PHASE_2_2C_LIVE_CALLER_MEMORY
+                        if event_type == "phone.call_state":
+                            call_state = str(
+                                event_payload.get("state") or ""
+                            ).strip().lower()
+
+                            call_number = str(
+                                event_payload.get("number") or ""
+                            ).strip()
+
+                            phone_contact_name = str(
+                                event_payload.get("caller_name") or ""
+                            ).strip()
+
+
+                            # Only query JARVIS memory for an incoming
+                            # ringing call that Android did not already
+                            # resolve from Contacts.
+                            if (
+                                call_state == "ringing"
+                                and call_number
+                                and not phone_contact_name
+                            ):
+                                intel = caller_intelligence.lookup(
+                                    call_number
+                                )
+
+                                intel_source = str(
+                                    getattr(
+                                        intel,
+                                        "source",
+                                        "",
+                                    ) or ""
+                                )
+
+                                intel_provider = str(
+                                    getattr(
+                                        intel,
+                                        "provider",
+                                        "",
+                                    ) or ""
+                                )
+
+                                # Send back only user-learned identity.
+                                # Unknown/cache/provider results are not
+                                # allowed to create extra announcements.
+                                if (
+                                    intel_source == "user_confirmed"
+                                    or intel_provider == "jarvis_local"
+                                ):
+                                    caller_intelligence.cache.record_seen(
+                                        call_number
+                                    )
+
+                                    await websocket.send_json({
+                                        "type":
+                                            "caller_intelligence_result",
+                                        "number":
+                                            call_number,
+                                        "phone":
+                                            str(
+                                                getattr(
+                                                    intel,
+                                                    "phone",
+                                                    "",
+                                                ) or ""
+                                            ),
+                                        "display_name":
+                                            str(
+                                                getattr(
+                                                    intel,
+                                                    "name",
+                                                    "",
+                                                )
+                                                or getattr(
+                                                    intel,
+                                                    "display_name",
+                                                    "",
+                                                )
+                                                or ""
+                                            ),
+                                        "category":
+                                            str(
+                                                getattr(
+                                                    intel,
+                                                    "category",
+                                                    "unknown",
+                                                ) or "unknown"
+                                            ),
+                                        "source":
+                                            intel_source,
+                                        "provider":
+                                            intel_provider,
+                                        "recommendation":
+                                            str(
+                                                getattr(
+                                                    intel,
+                                                    "recommendation",
+                                                    "inform",
+                                                ) or "inform"
+                                            ),
+                                        "confidence":
+                                            float(
+                                                getattr(
+                                                    intel,
+                                                    "confidence",
+                                                    0.0,
+                                                ) or 0.0
+                                            ),
+                                    })
 
                     continue
 
