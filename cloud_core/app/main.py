@@ -20,6 +20,7 @@ from fastapi import (
 )
 
 from .device_bus import device_manager
+from .phone_action_router import try_handle_phone_action
 from .device_events import device_event_store
 from .caller_intelligence import CallerIntelligence
 from .phone_pairing import (
@@ -168,6 +169,16 @@ async def _assistant_chat(
     *,
     source_device: str,
 ) -> dict:
+    # JARVIS_PHONE_ACTION_ROUTER_V1
+    # Deterministic device actions run before LLM reasoning.
+    phone_action = await try_handle_phone_action(
+        text=body.text,
+        source_device=source_device,
+    )
+
+    if phone_action is not None:
+        return phone_action
+
     gate = memory_store.process_user_text(
         body.text,
         source_device=source_device,

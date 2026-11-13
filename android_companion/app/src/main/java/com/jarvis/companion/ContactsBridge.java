@@ -87,33 +87,190 @@ public final class ContactsBridge {
         return out;
     }
 
-    public static JSONObject call(Context context, String rawNumber, String name) throws Exception {
-        if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
-            throw new SecurityException("Phone-call permission is not granted on the phone.");
+    public static JSONObject call(
+            Context context,
+            String rawNumber,
+            String name
+    ) throws Exception {
+
+        if (context.checkSelfPermission(
+                Manifest.permission.CALL_PHONE
+        ) != PackageManager.PERMISSION_GRANTED) {
+            throw new SecurityException(
+                    "Phone-call permission is not granted on the phone."
+            );
         }
-        String number = PhoneNumbers.displayIsraelLocal(rawNumber);
-        if (number.isEmpty()) throw new IllegalArgumentException("Phone number is empty.");
-        String digitsOnly = number.replaceAll("[^0-9]", "");
-        String[] emergencyNumbers = {"112", "911", "999", "000", "100", "101", "102", "110", "118", "119"};
+
+        String number =
+                PhoneNumbers.displayIsraelLocal(
+                        rawNumber
+                );
+
+        if (number.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Phone number is empty."
+            );
+        }
+
+        String digitsOnly =
+                number.replaceAll(
+                        "[^0-9]",
+                        ""
+                );
+
+        String[] emergencyNumbers = {
+                "112",
+                "911",
+                "999",
+                "000",
+                "100",
+                "101",
+                "102",
+                "110",
+                "118",
+                "119"
+        };
+
         for (String emergency : emergencyNumbers) {
             if (digitsOnly.equals(emergency)) {
-                throw new SecurityException("JARVIS will not automate emergency-number calls.");
+                throw new SecurityException(
+                        "JARVIS will not automate emergency-number calls."
+                );
             }
         }
+
         if (PhoneNumberUtils.isEmergencyNumber(number)) {
-            throw new SecurityException("JARVIS will not automate emergency-number calls.");
+            throw new SecurityException(
+                    "JARVIS will not automate emergency-number calls."
+            );
         }
-        TelecomManager telecom = (TelecomManager) context.getSystemService(Context.TELECOM_SERVICE);
-        if (telecom == null) throw new IllegalStateException("Android Telecom service is unavailable.");
-        telecom.placeCall(Uri.parse("tel:" + Uri.encode(number)), new Bundle());
-        CallJournal.record(context, name, number);
-        JSONObject out = new JSONObject();
-        out.put("ok", true);
-        out.put("mode", "cellular-handoff");
+
+        int beforeCount =
+                JarvisInCallService.callCount();
+
+        JarvisPhoneActions.Result request =
+                JarvisPhoneActions.placeCarrierCall(
+                        context,
+                        number
+                );
+
+        JSONObject out =
+                new JSONObject();
+
         out.put("number", number);
-        out.put("canonical_number", PhoneNumbers.canonical(number));
-        out.put("name", name == null ? "" : name);
-        out.put("message", "Call started on the phone. V29.2 hands the live SIM call to the user.");
+        out.put(
+                "canonical_number",
+                PhoneNumbers.canonical(number)
+        );
+        out.put(
+                "name",
+                name == null ? "" : name
+        );
+
+        if (!request.ok) {
+            out.put("ok", false);
+            out.put(
+                    "mode",
+                    "carrier-request-failed"
+            );
+            out.put(
+                    "error",
+                    request.message
+            );
+            return out;
+        }
+
+        long deadline =
+                android.os.SystemClock
+                        .elapsedRealtime()
+                        + 6000L;
+
+        boolean confirmed =
+                false;
+
+        int confirmedState =
+                android.telecom.Call
+                        .STATE_DISCONNECTED;
+
+        while (android.os.SystemClock
+                .elapsedRealtime()
+                < deadline) {
+
+            int count =
+                    JarvisInCallService
+                            .callCount();
+
+            int state =
+                    JarvisInCallService
+                            .currentState();
+
+            boolean outgoingState =
+                    state
+                            == android.telecom.Call
+                            .STATE_DIALING
+                    || state
+                            == android.telecom.Call
+                            .STATE_CONNECTING
+                    || state
+                            == android.telecom.Call
+                            .STATE_SELECT_PHONE_ACCOUNT
+                    || state
+                            == android.telecom.Call
+                            .STATE_ACTIVE;
+
+            if (count > beforeCount
+                    && outgoingState) {
+                confirmed = true;
+                confirmedState = state;
+                break;
+            }
+
+            try {
+                Thread.sleep(100L);
+            } catch (
+                    InterruptedException ex
+            ) {
+                Thread.currentThread()
+                        .interrupt();
+                break;
+            }
+        }
+
+        if (!confirmed) {
+            out.put("ok", false);
+            out.put(
+                    "mode",
+                    "carrier-request-unconfirmed"
+            );
+            out.put(
+                    "error",
+                    "Android Telecom accepted the call request, "
+                            + "but no outgoing call appeared in "
+                            + "JARVIS InCallService within 6 seconds."
+            );
+            return out;
+        }
+
+        CallJournal.record(
+                context,
+                name,
+                number
+        );
+
+        out.put("ok", true);
+        out.put(
+                "mode",
+                "carrier-call-confirmed"
+        );
+        out.put(
+                "telecom_state",
+                confirmedState
+        );
+        out.put(
+                "message",
+                "Outgoing carrier call confirmed by JARVIS InCallService."
+        );
+
         return out;
     }
 }
