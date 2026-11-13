@@ -27,6 +27,7 @@ import android.widget.LinearLayout;
 import android.widget.Space;
 import android.widget.TextView;
 
+import java.util.List;
 import java.util.Locale;
 
 public final class JarvisCallActivity
@@ -64,6 +65,8 @@ public final class JarvisCallActivity
     private TextView initialsView;
 
     private LinearLayout ringingRow;
+    private LinearLayout callStackPanel;
+    private TextView operationView;
     private GridLayout controlsGrid;
     private LinearLayout dtmfPanel;
     private LinearLayout hangupRow;
@@ -379,6 +382,45 @@ public final class JarvisCallActivity
                 sourceParams
         );
 
+        operationView =
+                new TextView(this);
+
+        operationView.setTextColor(ORANGE);
+        operationView.setTextSize(12f);
+        operationView.setGravity(Gravity.CENTER);
+        operationView.setVisibility(View.GONE);
+
+        LinearLayout.LayoutParams operationParams =
+                fullWidthWrap();
+
+        operationParams.topMargin = dp(8);
+
+        root.addView(
+                operationView,
+                operationParams
+        );
+
+        callStackPanel =
+                new LinearLayout(this);
+
+        callStackPanel.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        callStackPanel.setVisibility(
+                View.GONE
+        );
+
+        LinearLayout.LayoutParams stackParams =
+                fullWidthWrap();
+
+        stackParams.topMargin = dp(12);
+
+        root.addView(
+                callStackPanel,
+                stackParams
+        );
+
         Space spacer =
                 new Space(this);
 
@@ -528,6 +570,8 @@ public final class JarvisCallActivity
         }
 
         updateStateLine();
+        renderCallStack();
+        renderOperationMessage();
         rebuildActions();
     }
 
@@ -743,6 +787,7 @@ public final class JarvisCallActivity
                     v -> {
                         JarvisInCallService
                                 .toggleHoldCurrentCall();
+                        refresh();
                     }
             );
         }
@@ -782,6 +827,7 @@ public final class JarvisCallActivity
                     v -> {
                         JarvisInCallService
                                 .swapCalls();
+                        refresh();
                     }
             );
         }
@@ -796,6 +842,7 @@ public final class JarvisCallActivity
                     v -> {
                         JarvisInCallService
                                 .mergeCalls();
+                        refresh();
                     }
             );
         }
@@ -811,6 +858,243 @@ public final class JarvisCallActivity
                         }
                 )
         );
+    }
+
+    private void renderOperationMessage() {
+        String message =
+                JarvisInCallService
+                        .lastOperationMessage();
+
+        if (message == null
+                || message.trim().isEmpty()) {
+            operationView.setText("");
+            operationView.setVisibility(
+                    View.GONE
+            );
+            return;
+        }
+
+        operationView.setText(message);
+        operationView.setVisibility(
+                View.VISIBLE
+        );
+    }
+
+    private void renderCallStack() {
+        callStackPanel.removeAllViews();
+
+        List<JarvisInCallService.CallSnapshot> snapshots =
+                JarvisInCallService
+                        .visibleCallSnapshots();
+
+        boolean conference =
+                "conference".equals(
+                        JarvisInCallService
+                                .currentIdentitySource()
+                );
+
+        if (snapshots == null
+                || snapshots.isEmpty()
+                || (
+                snapshots.size() == 1
+                        && !conference
+        )) {
+            callStackPanel.setVisibility(
+                    View.GONE
+            );
+            return;
+        }
+
+        callStackPanel.setVisibility(
+                View.VISIBLE
+        );
+
+        TextView title =
+                new TextView(this);
+
+        title.setText(
+                conference
+                        ? "CONFERENCE PARTICIPANTS"
+                        : "CALLS"
+        );
+        title.setTextColor(MUTED);
+        title.setTextSize(11f);
+        title.setTypeface(
+                Typeface.DEFAULT_BOLD
+        );
+        title.setLetterSpacing(0.08f);
+
+        callStackPanel.addView(
+                title,
+                fullWidthWrap()
+        );
+
+        for (JarvisInCallService.CallSnapshot snapshot
+                : snapshots) {
+
+            callStackPanel.addView(
+                    callSnapshotCard(snapshot),
+                    stackCardParams()
+            );
+        }
+    }
+
+    private View callSnapshotCard(
+            JarvisInCallService.CallSnapshot snapshot
+    ) {
+        LinearLayout row =
+                new LinearLayout(this);
+
+        row.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+        row.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+        row.setPadding(
+                dp(12),
+                dp(9),
+                dp(12),
+                dp(9)
+        );
+
+        boolean held =
+                "ON HOLD".equals(
+                        snapshot.role
+                );
+
+        boolean active =
+                "ACTIVE".equals(
+                        snapshot.role
+                );
+
+        row.setBackground(
+                roundedRect(
+                        active
+                                ? Color.rgb(24, 35, 48)
+                                : CARD,
+                        dp(14),
+                        active
+                                ? ORANGE
+                                : Color.rgb(45, 58, 75),
+                        dp(1)
+                )
+        );
+
+        TextView status =
+                new TextView(this);
+
+        status.setText(snapshot.role);
+        status.setTextColor(
+                held
+                        ? MUTED
+                        : ORANGE
+        );
+        status.setTextSize(10f);
+        status.setTypeface(
+                Typeface.DEFAULT_BOLD
+        );
+        status.setGravity(
+                Gravity.CENTER
+        );
+        status.setPadding(
+                dp(7),
+                dp(5),
+                dp(7),
+                dp(5)
+        );
+
+        LinearLayout text =
+                new LinearLayout(this);
+
+        text.setOrientation(
+                LinearLayout.VERTICAL
+        );
+        text.setPadding(
+                dp(10),
+                0,
+                0,
+                0
+        );
+
+        TextView name =
+                new TextView(this);
+
+        name.setText(
+                safeName(
+                        snapshot.displayName
+                )
+        );
+        name.setTextColor(TEXT);
+        name.setTextSize(15f);
+        name.setTypeface(
+                Typeface.DEFAULT_BOLD
+        );
+
+        TextView number =
+                new TextView(this);
+
+        number.setText(
+                snapshot.number == null
+                        ? ""
+                        : snapshot.number
+        );
+        number.setTextColor(MUTED);
+        number.setTextSize(12f);
+
+        text.addView(name);
+
+        if (snapshot.number != null
+                && !snapshot.number
+                .trim()
+                .isEmpty()) {
+            text.addView(number);
+        }
+
+        row.addView(status);
+        row.addView(
+                text,
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+        return row;
+    }
+
+    private LinearLayout.LayoutParams stackCardParams() {
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        params.topMargin = dp(6);
+        return params;
+    }
+
+    private GradientDrawable roundedRect(
+            int fill,
+            int radius,
+            int stroke,
+            int strokeWidth
+    ) {
+        GradientDrawable drawable =
+                new GradientDrawable();
+
+        drawable.setColor(fill);
+        drawable.setCornerRadius(radius);
+
+        if (strokeWidth > 0) {
+            drawable.setStroke(
+                    strokeWidth,
+                    stroke
+            );
+        }
+
+        return drawable;
     }
 
     private void addControl(

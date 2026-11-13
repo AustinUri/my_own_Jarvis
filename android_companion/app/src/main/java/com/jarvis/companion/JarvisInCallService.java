@@ -10,16 +10,53 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.telecom.Call;
 import android.telecom.CallAudioState;
 import android.telecom.InCallService;
+import android.util.Log;
 import android.telecom.VideoProfile;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class JarvisInCallService
         extends InCallService {
+
+    private static final String LOG_TAG =
+            "JARVIS_CALL";
+
+    public static final class CallSnapshot {
+        public final String displayName;
+        public final String number;
+        public final String role;
+        public final Bitmap photo;
+        public final boolean primary;
+
+        CallSnapshot(
+                String displayName,
+                String number,
+                String role,
+                Bitmap photo,
+                boolean primary
+        ) {
+            this.displayName =
+                    displayName == null
+                            ? ""
+                            : displayName;
+            this.number =
+                    number == null
+                            ? ""
+                            : number;
+            this.role =
+                    role == null
+                            ? ""
+                            : role;
+            this.photo = photo;
+            this.primary = primary;
+        }
+    }
 
     public static final String ACTION_UI_UPDATE =
             "com.jarvis.companion.CALL_UI_UPDATE";
@@ -62,6 +99,9 @@ public final class JarvisInCallService
     private static volatile int routeBeforeSpeaker =
             CallAudioState.ROUTE_EARPIECE;
 
+    private static volatile String operationMessage = "";
+    private static volatile long operationMessageAt = 0L;
+
     private final Call.Callback callback =
             new Call.Callback() {
 
@@ -70,6 +110,7 @@ public final class JarvisInCallService
                 Call call,
                 int state
         ) {
+            logTopology("state-changed:" + state);
             selectForegroundCall();
             refreshCurrentSnapshot();
             updateNotificationAndUi();
@@ -90,6 +131,7 @@ public final class JarvisInCallService
                 Call call,
                 List<Call> conferenceableCalls
         ) {
+            logTopology("conferenceable-changed");
             selectForegroundCall();
             refreshCurrentSnapshot();
             updateNotificationAndUi();
@@ -100,6 +142,7 @@ public final class JarvisInCallService
                 Call call,
                 List<Call> children
         ) {
+            logTopology("children-changed");
             selectForegroundCall();
             refreshCurrentSnapshot();
             updateNotificationAndUi();
@@ -110,6 +153,57 @@ public final class JarvisInCallService
                 Call call,
                 Call parent
         ) {
+            selectForegroundCall();
+            refreshCurrentSnapshot();
+            updateNotificationAndUi();
+        }
+
+        @Override
+        public void onConnectionEvent(
+                Call call,
+                String event,
+                Bundle extras
+        ) {
+            String safeEvent =
+                    event == null
+                            ? ""
+                            : event;
+
+            Log.i(
+                    LOG_TAG,
+                    "connectionEvent=" + safeEvent
+            );
+
+            if (safeEvent.endsWith(
+                    "CALL_MERGE_FAILED"
+            )) {
+                setOperationMessage(
+                        "Merge failed — Telecom/carrier rejected it"
+                );
+            } else if (safeEvent.endsWith(
+                    "CALL_HOLD_FAILED"
+            )) {
+                setOperationMessage(
+                        "Hold failed — Telecom/carrier rejected it"
+                );
+            } else if (safeEvent.endsWith(
+                    "CALL_SWITCH_FAILED"
+            )) {
+                setOperationMessage(
+                        "Switch failed — Telecom/carrier rejected it"
+                );
+            } else if (safeEvent.endsWith(
+                    "MERGE_COMPLETE"
+            )) {
+                setOperationMessage(
+                        "Conference created"
+                );
+            }
+
+            logTopology(
+                    "connection-event"
+            );
+
             selectForegroundCall();
             refreshCurrentSnapshot();
             updateNotificationAndUi();
@@ -145,6 +239,7 @@ public final class JarvisInCallService
 
         call.registerCallback(callback);
 
+        logTopology("call-added");
         selectForegroundCall();
         refreshCurrentSnapshot();
         updateNotificationAndUi();
@@ -161,6 +256,7 @@ public final class JarvisInCallService
             calls.remove(call);
         }
 
+        logTopology("call-removed");
         selectForegroundCall();
         refreshCurrentSnapshot();
 
@@ -431,17 +527,13 @@ public final class JarvisInCallService
 
         int state = call.getState();
 
-        if (state != Call.STATE_ACTIVE
-                && state != Call.STATE_HOLDING) {
-            return false;
+        if (state == Call.STATE_HOLDING) {
+            return true;
         }
 
-        return state == Call.STATE_HOLDING
-                || call.getDetails().can(
+        return state == Call.STATE_ACTIVE
+                && call.getDetails().can(
                 Call.Details.CAPABILITY_HOLD
-        )
-                || call.getDetails().can(
-                Call.Details.CAPABILITY_SUPPORT_HOLD
         );
     }
 
@@ -450,12 +542,17 @@ public final class JarvisInCallService
 
         if (call == null
                 || call.getDetails() == null) {
+            setOperationMessage(
+                    "Hold unavailable for this call"
+            );
             return false;
         }
 
         int state = call.getState();
 
         if (state == Call.STATE_HOLDING) {
+            setOperationMessage("Resuming call…");
+            Log.i(LOG_TAG, "unhold requested");
             call.unhold();
             return true;
         }
@@ -464,24 +561,27 @@ public final class JarvisInCallService
                 && call.getDetails().can(
                 Call.Details.CAPABILITY_HOLD
         )) {
+            setOperationMessage("Putting call on hold…");
+            Log.i(LOG_TAG, "hold requested");
             call.hold();
             return true;
         }
 
+        setOperationMessage(
+                "Hold unavailable for this call"
+        );
         return false;
     }
 
     public static boolean canAddCallNow() {
-        JarvisInCallService service =
-                instance;
+        JarvisInCallService service = instance;
 
         if (service == null
                 || currentCall == null) {
             return false;
         }
 
-        int state =
-                currentCall.getState();
+        int state = currentCall.getState();
 
         if (state != Call.STATE_ACTIVE
                 && state != Call.STATE_HOLDING) {
@@ -496,13 +596,12 @@ public final class JarvisInCallService
     }
 
     public static boolean canSwapCalls() {
-        Call call = currentCall;
+        Call conference =
+                findConferenceWithCapability(
+                        Call.Details.CAPABILITY_SWAP_CONFERENCE
+                );
 
-        if (call != null
-                && call.getDetails() != null
-                && call.getDetails().can(
-                Call.Details.CAPABILITY_SWAP_CONFERENCE
-        )) {
+        if (conference != null) {
             return true;
         }
 
@@ -515,15 +614,15 @@ public final class JarvisInCallService
     }
 
     public static boolean swapCalls() {
-        Call call = currentCall;
+        Call conference =
+                findConferenceWithCapability(
+                        Call.Details.CAPABILITY_SWAP_CONFERENCE
+                );
 
-        if (call != null
-                && call.getDetails() != null
-                && call.getDetails().can(
-                Call.Details.CAPABILITY_SWAP_CONFERENCE
-        )) {
-
-            call.swapConference();
+        if (conference != null) {
+            setOperationMessage("Switching conference calls…");
+            Log.i(LOG_TAG, "swapConference requested");
+            conference.swapConference();
             return true;
         }
 
@@ -540,83 +639,172 @@ public final class JarvisInCallService
         if (active == null
                 || held == null
                 || active == held) {
+            setOperationMessage(
+                    "Switch unavailable — active + held calls not found"
+            );
             return false;
         }
 
-        if (active.getDetails() != null
-                && active.getDetails().can(
-                Call.Details.CAPABILITY_HOLD
-        )) {
-            active.hold();
-        }
-
+        // Do not manually hold() and immediately unhold() in the same
+        // stack frame. Telecom owns foreground arbitration; unholding
+        // the held call requests the platform to swap foreground calls.
+        setOperationMessage("Switching calls…");
+        Log.i(
+                LOG_TAG,
+                "swap separate calls: unhold held call"
+        );
         held.unhold();
-
         return true;
     }
 
     public static boolean canMergeCalls() {
-        for (Call call : calls) {
-            if (call == null
-                    || call.getState()
-                    == Call.STATE_DISCONNECTED) {
-                continue;
-            }
+        Call[] pair = findConferenceablePair();
 
-            if (call.getDetails() != null
-                    && call.getDetails().can(
-                    Call.Details.CAPABILITY_MERGE_CONFERENCE
-            )) {
-                return true;
-            }
-
-            List<Call> conferenceable =
-                    call.getConferenceableCalls();
-
-            if (conferenceable != null
-                    && !conferenceable.isEmpty()) {
-                return true;
-            }
+        if (pair != null) {
+            return true;
         }
 
-        return false;
+        return findConferenceWithCapability(
+                Call.Details.CAPABILITY_MERGE_CONFERENCE
+        ) != null;
     }
 
     public static boolean mergeCalls() {
+        // IMPORTANT: two separate carrier calls are first merged through
+        // Call.conference(other) when Telecom explicitly lists them as
+        // conferenceable. CAPABILITY_MERGE_CONFERENCE is primarily for an
+        // already-created Conference call whose children still need merging.
+        Call[] pair = findConferenceablePair();
+
+        if (pair != null) {
+            setOperationMessage("Merging calls…");
+            Log.i(
+                    LOG_TAG,
+                    "conference(pair) requested"
+            );
+            pair[0].conference(pair[1]);
+            return true;
+        }
+
+        Call conference =
+                findConferenceWithCapability(
+                        Call.Details.CAPABILITY_MERGE_CONFERENCE
+                );
+
+        if (conference != null) {
+            setOperationMessage("Merging conference…");
+            Log.i(
+                    LOG_TAG,
+                    "mergeConference requested"
+            );
+            conference.mergeConference();
+            return true;
+        }
+
+        setOperationMessage(
+                "Merge unavailable — Telecom exposed no conferenceable pair"
+        );
+        logTopology("merge-unavailable");
+        return false;
+    }
+
+    private static Call[] findConferenceablePair() {
+        // Prefer the currently active call because that mirrors the normal
+        // active + held GSM/IMS two-call flow.
+        Call active =
+                findCallInState(
+                        Call.STATE_ACTIVE
+                );
+
+        Call[] activePair =
+                conferenceablePairFor(active);
+
+        if (activePair != null) {
+            return activePair;
+        }
+
+        Call held =
+                findCallInState(
+                        Call.STATE_HOLDING
+                );
+
+        Call[] heldPair =
+                conferenceablePairFor(held);
+
+        if (heldPair != null) {
+            return heldPair;
+        }
+
         for (Call call : calls) {
-            if (call == null
-                    || call.getState()
+            Call[] pair =
+                    conferenceablePairFor(call);
+
+            if (pair != null) {
+                return pair;
+            }
+        }
+
+        return null;
+    }
+
+    private static Call[] conferenceablePairFor(
+            Call call
+    ) {
+        if (call == null
+                || call.getState()
+                == Call.STATE_DISCONNECTED) {
+            return null;
+        }
+
+        List<Call> conferenceable =
+                call.getConferenceableCalls();
+
+        if (conferenceable == null
+                || conferenceable.isEmpty()) {
+            return null;
+        }
+
+        for (Call other : conferenceable) {
+            if (other == null
+                    || other == call
+                    || other.getState()
                     == Call.STATE_DISCONNECTED) {
                 continue;
             }
 
-            if (call.getDetails() != null
-                    && call.getDetails().can(
-                    Call.Details.CAPABILITY_MERGE_CONFERENCE
-            )) {
+            return new Call[]{call, other};
+        }
 
-                call.mergeConference();
-                return true;
+        return null;
+    }
+
+    private static Call findConferenceWithCapability(
+            int capability
+    ) {
+        for (Call call : calls) {
+            if (call == null
+                    || call.getState()
+                    == Call.STATE_DISCONNECTED
+                    || call.getDetails() == null) {
+                continue;
             }
 
-            List<Call> conferenceable =
-                    call.getConferenceableCalls();
+            List<Call> children =
+                    call.getChildren();
 
-            if (conferenceable != null
-                    && !conferenceable.isEmpty()) {
+            boolean conference =
+                    children != null
+                            && !children.isEmpty();
 
-                Call other =
-                        conferenceable.get(0);
-
-                if (other != null
-                        && other != call) {
-                    call.conference(other);
-                    return true;
-                }
+            if (conference
+                    && call.getDetails().can(
+                    capability
+            )) {
+                return call;
             }
         }
 
-        return false;
+        return null;
     }
 
     public static boolean playDtmf(
@@ -698,6 +886,230 @@ public final class JarvisInCallService
             default:
                 return "Call";
         }
+    }
+
+    public static List<CallSnapshot> visibleCallSnapshots() {
+        ArrayList<CallSnapshot> out =
+                new ArrayList<>();
+
+        JarvisInCallService service = instance;
+
+        if (service == null) {
+            return out;
+        }
+
+        for (Call call : calls) {
+            if (call == null
+                    || call.getState()
+                    == Call.STATE_DISCONNECTED
+                    || call.getParent() != null) {
+                continue;
+            }
+
+            List<Call> children =
+                    call.getChildren();
+
+            if (children != null
+                    && !children.isEmpty()) {
+                for (Call child : children) {
+                    CallSnapshot snapshot =
+                            service.snapshotForCall(
+                                    child,
+                                    "IN CONFERENCE",
+                                    false
+                            );
+
+                    if (snapshot != null) {
+                        out.add(snapshot);
+                    }
+                }
+
+                continue;
+            }
+
+            CallSnapshot snapshot =
+                    service.snapshotForCall(
+                            call,
+                            roleForState(
+                                    call.getState()
+                            ),
+                            call == currentCall
+                    );
+
+            if (snapshot != null) {
+                out.add(snapshot);
+            }
+        }
+
+        // Some telephony implementations may momentarily expose children
+        // without a visible parent in our current list. Do not leave the UI
+        // blank in that transition.
+        if (out.isEmpty()) {
+            for (Call call : calls) {
+                if (call == null
+                        || call.getState()
+                        == Call.STATE_DISCONNECTED) {
+                    continue;
+                }
+
+                CallSnapshot snapshot =
+                        service.snapshotForCall(
+                                call,
+                                roleForState(
+                                        call.getState()
+                                ),
+                                call == currentCall
+                        );
+
+                if (snapshot != null) {
+                    out.add(snapshot);
+                }
+            }
+        }
+
+        return out;
+    }
+
+    public static String lastOperationMessage() {
+        String message = operationMessage;
+
+        if (message == null
+                || message.isEmpty()) {
+            return "";
+        }
+
+        if (System.currentTimeMillis()
+                - operationMessageAt
+                > 8000L) {
+            return "";
+        }
+
+        return message;
+    }
+
+    private static void setOperationMessage(
+            String message
+    ) {
+        operationMessage =
+                message == null
+                        ? ""
+                        : message;
+        operationMessageAt =
+                System.currentTimeMillis();
+        broadcastUiUpdateStatic();
+    }
+
+    private CallSnapshot snapshotForCall(
+            Call call,
+            String role,
+            boolean primary
+    ) {
+        if (call == null) {
+            return null;
+        }
+
+        JarvisCallerIdentity.Result identity =
+                JarvisCallerIdentity.resolve(
+                        this,
+                        numberFromCall(call),
+                        telecomNameFromCall(call)
+                );
+
+        return new CallSnapshot(
+                identity.displayName,
+                identity.number,
+                role,
+                identity.photo,
+                primary
+        );
+    }
+
+    private static String roleForState(
+            int state
+    ) {
+        switch (state) {
+            case Call.STATE_ACTIVE:
+                return "ACTIVE";
+
+            case Call.STATE_HOLDING:
+                return "ON HOLD";
+
+            case Call.STATE_RINGING:
+            case Call.STATE_SIMULATED_RINGING:
+                return "RINGING";
+
+            case Call.STATE_DIALING:
+                return "CALLING";
+
+            case Call.STATE_CONNECTING:
+                return "CONNECTING";
+
+            default:
+                return "CALL";
+        }
+    }
+
+    private static void logTopology(
+            String reason
+    ) {
+        StringBuilder builder =
+                new StringBuilder();
+
+        builder.append(reason)
+                .append(" calls=")
+                .append(calls.size());
+
+        int index = 0;
+
+        for (Call call : calls) {
+            if (call == null) {
+                continue;
+            }
+
+            int capabilityMask = 0;
+
+            if (call.getDetails() != null) {
+                capabilityMask =
+                        call.getDetails()
+                                .getCallCapabilities();
+            }
+
+            List<Call> conf =
+                    call.getConferenceableCalls();
+
+            List<Call> children =
+                    call.getChildren();
+
+            builder.append(" | #")
+                    .append(index++)
+                    .append(" state=")
+                    .append(call.getState())
+                    .append(" caps=0x")
+                    .append(Integer.toHexString(
+                            capabilityMask
+                    ))
+                    .append(" conf=")
+                    .append(
+                            conf == null
+                                    ? 0
+                                    : conf.size()
+                    )
+                    .append(" children=")
+                    .append(
+                            children == null
+                                    ? 0
+                                    : children.size()
+                    )
+                    .append(" parent=")
+                    .append(
+                            call.getParent() != null
+                    );
+        }
+
+        Log.i(
+                LOG_TAG,
+                builder.toString()
+        );
     }
 
     private static int bestPrivateRoute() {

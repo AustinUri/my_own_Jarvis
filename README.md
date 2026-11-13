@@ -328,3 +328,274 @@ The long-term goal is not a command-only assistant.
 JARVIS is being developed as an always-available personal AI system that can understand natural requests, remember useful context, work across the PC and phone, interact with tools and devices, observe through camera/voice inputs, and gradually take on more complex engineering, communication, research, and automation tasks.
 
 V30 is the transition from a mostly PC-centered assistant to a multi-device JARVIS platform.
+
+<!-- JARVIS_PHASE2_STATUS_START -->
+## Phase 2 — Android Phone / Call Control Status
+
+Last verified milestone: **JARVIS Phone v1.4 — Multi-Call Fix**
+
+### VERIFIED on real Samsung device
+
+The following functions were tested on the real Android device and passed:
+
+- JARVIS operates as the Android default dialer.
+- Incoming carrier calls display caller identity and can be answered or rejected.
+- Outgoing carrier calls work from JARVIS Phone.
+- Hang up works.
+- Mute / Unmute works.
+- Speaker on / off works.
+- Hold / Resume works.
+- Add Call works.
+- During two simultaneous calls, JARVIS displays which caller is **ACTIVE** and which caller is **ON HOLD**.
+- Switch between active and held calls works.
+- Merge works for two carrier calls.
+- Conference-call mode works.
+- Conference UI displays the conference participants instead of only a generic conference label.
+- Ending one call while another remains does not incorrectly terminate the remaining call.
+- Call-waiting / multi-call behavior passed the current real-device test.
+
+### UNTESTED
+
+- In-call DTMF keypad is implemented but has **not yet been verified against a real IVR / touch-tone system**.
+
+### OPEN Phase 2 work
+
+#### Contacts / caller UI
+
+- Show profile photos directly in the Contacts list.
+- Build a JARVIS-owned contact editor for:
+  - add contact,
+  - edit contact,
+  - delete contact,
+  - add / change profile photo,
+  - manage multiple phone numbers.
+- JARVIS should use Android Contacts Provider underneath so Google/Samsung account synchronization remains intact, but contact management should happen inside the JARVIS UI rather than launching Samsung Contacts.
+
+- Add **Favorites** support while keeping starred contacts synchronized with the Android/account contact store.
+- Add contact **Groups / Categories** such as Favorites, Family, Friends, Work and user-created groups.
+- Store group membership through Android Contacts Provider rather than creating a disconnected JARVIS-only contact database.
+- Replace the current `MANAGE` action, which opens the system/Samsung Contacts UI, with a JARVIS-owned contact details/editor screen.
+- Investigate `MANAGE_CONTACTS` special access for the JARVIS default-dialer/contact-manager role, with a compatible fallback for Android versions that do not support it.
+- Add Favorites support using the Android Contacts Provider so starred
+  contacts remain synchronized with the device/account contact store.
+- Add contact Groups / Categories such as Favorites, Family, Friends,
+  Work and user-created groups.
+- Read and write group membership through the Android Contacts Provider
+  rather than maintaining a disconnected JARVIS-only contact database.
+- Replace the current MANAGE action, which launches the system Contacts
+  application, with a JARVIS-owned contact details/editor UI.
+- Investigate and adopt Android MANAGE_CONTACTS special access where
+  appropriate for the JARVIS default-dialer/contact-manager role,
+  with a compatible fallback for Android versions that do not support it.
+
+#### Voice / natural-language call control
+
+- Commands such as **"Call Mom"** must resolve the contact and route through `JarvisPhoneActions` / Android Telecom.
+- JARVIS must report real device execution status rather than announcing success before Android confirms the action.
+- Voice Answer / Reject / Hang Up integration remains part of Phase 2.
+
+#### Garmin / wearable integration
+
+- Garmin currently identifies some incoming calls as if **JARVIS** is calling instead of showing the real caller.
+- Correct caller identity exposed through Android Telecom / call notifications so connected wearables receive the real caller.
+- Test and integrate Answer / Reject from the Garmin watch with the JARVIS default-dialer path.
+
+#### Android / Oracle reliability
+
+A long message sent from the phone previously returned a timeout / response-time error.
+
+Add observability before changing timeout values:
+
+- request payload size,
+- Android -> Oracle latency,
+- Oracle processing time,
+- model/provider latency,
+- total response time,
+- HTTP / Device Bus result,
+- structured error reason.
+
+Do not simply increase timeouts without locating the failing stage.
+
+#### Call recording and AI call intelligence
+
+Call recording remains a **critical Phase 2.4 requirement**.
+
+Target flow:
+
+```text
+Carrier / JARVIS call
+        |
+        v
+Supported recording path
+        |
+        v
+Transcript
+        |
+        v
+Oracle
+        |
+        v
+AI call summary
+        |
+        v
+Searchable call intelligence / memory
+```
+
+Android does not expose unrestricted carrier-call audio capture to ordinary third-party apps, so recording must use a technically supported path. Do not add a fake Record button before an actual recording backend exists.
+
+Paths to investigate:
+
+- Samsung / vendor recording interoperability or import.
+- Supported telephony / VoIP / AI-phone provider path.
+- Provider-independent JARVIS phone identity for AI-originated calls.
+- Transcript ingestion into Oracle for summaries and memory.
+- AgentPhone or an equivalent telephony provider as an optional JARVIS AI phone line, without locking JARVIS to Claude or any single model vendor.
+
+### Phase 2 validation rule
+
+A capability is marked **VERIFIED** only after it works on the real device.
+
+Implemented-but-untested features remain explicitly marked **UNTESTED**.
+
+Known failures remain **OPEN** until a real-device retest passes.
+<!-- JARVIS_PHASE2_STATUS_END -->
+
+<!-- JARVIS_TODAY_DECISIONS_START -->
+## Newly Adopted Project Decisions
+
+### Current / near-term work
+
+These items are considered part of the active product roadmap rather than optional experiments.
+
+#### Security and compliance gate
+
+Before any public/commercial release of the Revenue product:
+
+- perform a structured security review,
+- verify authentication and authorization,
+- remove or rotate exposed secrets,
+- enforce HTTPS,
+- restrict CORS,
+- use parameterized queries,
+- add server-side validation,
+- add rate limiting,
+- review uploads and file-size limits,
+- disable debug mode,
+- review dependencies and unused packages,
+- scan Git history for secrets,
+- review admin routes and payment verification,
+- add security headers,
+- review cookie / CSRF handling where applicable,
+- log suspicious activity,
+- produce a final PASS / FAIL / OPEN report.
+
+The commercial website must also have a launch compliance review covering:
+
+- Privacy Policy,
+- Terms and Conditions,
+- Cookie Policy / consent where legally required,
+- Refund Policy,
+- explicit and appropriate consent on forms,
+- data minimization,
+- analytics and third-party embeds,
+- accessibility,
+- alt text,
+- color contrast,
+- keyboard-only form usage,
+- clear button labels,
+- no fake reviews,
+- no unsupported claims,
+- business details,
+- image / copyright rights,
+- payment-installment disclosure before purchase,
+- Israeli Privacy Protection Law / Amendment 13,
+- GDPR where applicable,
+- CCPA / CPRA where applicable.
+
+This checklist is a release gate, not a substitute for professional legal advice.
+
+#### UI quality gate
+
+Adopt a repeatable UI quality process for JARVIS and Revenue surfaces:
+
+```text
+Functional Test
+    ->
+Security Review
+    ->
+Accessibility Audit
+    ->
+UX Critique
+    ->
+Harden
+    ->
+Polish
+    ->
+Real Device Test
+```
+
+Use a consistent design system / `DESIGN.md` so JARVIS does not drift into inconsistent "vibe-coded" UI.
+
+Impeccable-style audit / harden / polish workflows and Google Stitch may be used as design-development tools, but functionality and real-device testing come first.
+
+### Later — Phase 5 / Coding JARVIS
+
+The following are intentionally deferred until the active Phone / Revenue work is stable.
+
+#### Codebase quality and engineering tooling
+
+- Run a structured JARVIS codebase untangling / cleanup pass before major Phase 5 expansion.
+- Reduce duplicate utilities, obsolete patch artifacts and architectural drift from older V22-V30 iterations.
+- Use a gated workflow similar to `codebase-untangler`:
+  - baseline,
+  - audit,
+  - safety tests,
+  - small refactors,
+  - hardening,
+  - handover.
+- Evaluate `REA` as an engineering / reverse-engineering assistant for APKs, binaries, Electron/.NET/native software and interoperability research.
+- Keep such tools external to the JARVIS runtime unless there is a clear reason to integrate them.
+
+#### Skills and agent tooling
+
+- Evaluate a small curated subset of **Skills IL** for Israel-specific capabilities such as Hebrew, government, finance, legal-tech and local workflows.
+- Do not install an entire large skill catalog blindly.
+- Every imported skill must be reviewed for security, necessity and overlap with existing JARVIS tools.
+
+#### AI provider architecture
+
+Maintain a provider abstraction rather than hard-coding one model vendor.
+
+Planned evaluation:
+
+- OpenAI as a primary provider where appropriate,
+- Claude as an additional specialist / reviewer / coding provider,
+- local Qwen / LM Studio for local or privacy-sensitive workflows,
+- optional low-cost/free providers only for non-sensitive work and only after privacy / reliability review.
+
+`FreeLLMAPI` may be evaluated as a development/fallback experiment, but must not receive sensitive personal, business or chat data without a deliberate security/privacy review.
+
+#### Architecture / competitive research
+
+Use projects such as:
+
+- usejarvis.dev,
+- Azaris,
+- Strata,
+
+as architecture and product-reference material.
+
+Do not copy code from projects whose licenses or architecture do not fit JARVIS.
+
+Useful patterns to study include:
+
+- one shared brain with lightweight device agents,
+- visible agent state,
+- permission levels,
+- approval before irreversible actions,
+- scheduled routines,
+- shared memory,
+- provider-independent tool execution.
+
+Phase 6 remains the home for deeper OS portability and Windows -> Linux adaptation work.
+<!-- JARVIS_TODAY_DECISIONS_END -->
