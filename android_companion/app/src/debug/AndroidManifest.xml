@@ -2,16 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+
     <application>
 
-        <!-- Retire the old Pairing/Connection screen as the launcher.
-             It remains available internally as Advanced diagnostics. -->
+        <!-- Legacy connection screen remains available only through
+             Advanced diagnostics inside JARVIS. -->
         <activity
             android:name=".MainActivity"
             android:exported="false"
             tools:node="replace" />
 
-        <!-- One normal JARVIS app launcher. -->
+        <!-- One normal JARVIS launcher. -->
         <activity
             android:name=".JarvisHomeActivity"
             android:exported="true"
@@ -21,6 +23,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- JARVIS-owned contact editor. -->
+        <activity
+            android:name=".JarvisContactEditorActivity"
+            android:exported="false"
+            android:label="JARVIS Contact" />
 
     </application>
 

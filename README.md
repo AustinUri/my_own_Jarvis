@@ -362,6 +362,27 @@ The following functions were tested on the real Android device and passed:
 
 #### Contacts / caller UI
 
+**Verified milestone: JARVIS Phone v1.5.2 — Contacts Cleanup**
+
+Verified on the real Samsung device:
+
+- Contact photos appear in the JARVIS contact experience.
+- Favorites are handled inside JARVIS.
+- Contact groups/categories are shown inside JARVIS.
+- Duplicate group names across accounts are merged in the JARVIS UI.
+- Legacy/noise groups such as ICE, My Contacts, Starred in Android and restored-device groups are hidden from the normal JARVIS category bar.
+- Add Contact and Contact Details/Edit stay inside JARVIS instead of launching Samsung Contacts.
+- New groups can be created inside JARVIS.
+- Groups can be deleted inside JARVIS with confirmation.
+- Group deletion was repeatedly tested and does **not** delete the contacts that belonged to the group.
+- Android Contacts Provider remains the address-book source of truth so normal device/account synchronization can continue.
+- Oracle is reserved for AI/person memory, aliases, history, call summaries and intelligence rather than acting as a second competing address book.
+
+Deferred UI polish:
+
+- The Account selector is currently functional and cleaned up, but it should eventually be removed from the normal user-facing flow and replaced with a sensible default/account policy behind the scenes.
+
+
 - Show profile photos directly in the Contacts list.
 - Build a JARVIS-owned contact editor for:
   - add contact,

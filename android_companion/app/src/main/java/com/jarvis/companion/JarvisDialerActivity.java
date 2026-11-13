@@ -24,6 +24,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageView;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Space;
@@ -66,6 +67,10 @@ public final class JarvisDialerActivity extends Activity {
     private TextView tabKeypad;
     private String pendingNumber = "";
     private boolean addCallMode = false;
+    private boolean contactsRefreshOnResume = false;
+    private boolean favoritesOnly = false;
+    private final Set<Long> selectedGroupIds =
+            new LinkedHashSet<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,6 +96,17 @@ public final class JarvisDialerActivity extends Activity {
             showKeypad(incoming);
         } else {
             showRecents();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (contactsRefreshOnResume
+                && tabContacts != null) {
+            contactsRefreshOnResume = false;
+            showContacts();
         }
     }
 
@@ -249,21 +265,44 @@ public final class JarvisDialerActivity extends Activity {
         selectTab(tabContacts);
         clearContent();
 
-        LinearLayout headingRow = new LinearLayout(this);
-        headingRow.setOrientation(LinearLayout.HORIZONTAL);
-        headingRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout headingRow =
+                new LinearLayout(this);
 
-        LinearLayout headingBlock = new LinearLayout(this);
-        headingBlock.setOrientation(LinearLayout.VERTICAL);
-        headingBlock.addView(headingText("Contacts"));
+        headingRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        headingRow.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        LinearLayout headingBlock =
+                new LinearLayout(this);
+
+        headingBlock.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        headingBlock.addView(
+                headingText("Contacts")
+        );
+
         headingBlock.addView(
                 smallText(
-                        "One person once — all numbers grouped together"
+                        "JARVIS contacts — synced through Android Contacts Provider"
                 )
         );
 
-        TextView add = chip("+ ADD", ORANGE, Color.WHITE);
-        add.setOnClickListener(v -> addContact());
+        TextView add =
+                chip(
+                        "+ ADD",
+                        ORANGE,
+                        Color.WHITE
+                );
+
+        add.setOnClickListener(
+                v -> addContact()
+        );
 
         headingRow.addView(
                 headingBlock,
@@ -273,6 +312,7 @@ public final class JarvisDialerActivity extends Activity {
                         1f
                 )
         );
+
         headingRow.addView(add);
         content.addView(headingRow);
 
@@ -282,7 +322,7 @@ public final class JarvisDialerActivity extends Activity {
 
             permissionCard(
                     "Contacts permission",
-                    "Allow Contacts access for names and photos.",
+                    "Allow Contacts access for names, groups and photos.",
                     v -> requestPermissions(
                             new String[]{
                                     Manifest.permission.READ_CONTACTS
@@ -293,7 +333,9 @@ public final class JarvisDialerActivity extends Activity {
             return;
         }
 
-        EditText search = new EditText(this);
+        EditText search =
+                new EditText(this);
+
         search.setHint("Search contacts");
         search.setHintTextColor(MUTED);
         search.setTextColor(TEXT);
@@ -305,24 +347,199 @@ public final class JarvisDialerActivity extends Activity {
                 dp(17),
                 dp(13)
         );
+
         search.setBackground(
                 rounded(CARD, dp(18))
         );
 
         content.addView(
                 search,
-                fullWidthWrap(dp(14), dp(7))
+                fullWidthWrap(
+                        dp(14),
+                        dp(7)
+                )
         );
 
-        LinearLayout results = new LinearLayout(this);
-        results.setOrientation(LinearLayout.VERTICAL);
+        HorizontalScrollView filterScroll =
+                new HorizontalScrollView(this);
+
+        filterScroll.setHorizontalScrollBarEnabled(
+                false
+        );
+
+        LinearLayout filters =
+                new LinearLayout(this);
+
+        filters.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        filters.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        filterScroll.addView(filters);
+
+        content.addView(
+                filterScroll,
+                fullWidthWrap(
+                        dp(4),
+                        dp(8)
+                )
+        );
+
+        LinearLayout results =
+                new LinearLayout(this);
+
+        results.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
         content.addView(results);
 
-        Runnable reload =
+        Runnable render =
                 () -> renderContacts(
                         results,
-                        search.getText().toString()
+                        search.getText()
+                                .toString()
                 );
+
+        Runnable rebuildFilters =
+                () -> {
+                    filters.removeAllViews();
+
+                    TextView all =
+                            filterChip(
+                                    "ALL",
+                                    !favoritesOnly
+                                            && selectedGroupIds
+                                            .isEmpty()
+                            );
+
+                    all.setOnClickListener(
+                            v -> {
+                                favoritesOnly = false;
+                                selectedGroupIds.clear();
+                                showContacts();
+                            }
+                    );
+
+                    filters.addView(all);
+                    filters.addView(space(dp(7)));
+
+                    TextView favorites =
+                            filterChip(
+                                    "\u2605 FAVORITES",
+                                    favoritesOnly
+                            );
+
+                    favorites.setOnClickListener(
+                            v -> {
+                                favoritesOnly = true;
+                                selectedGroupIds.clear();
+                                showContacts();
+                            }
+                    );
+
+                    filters.addView(favorites);
+
+                    /*
+                     * The same human category can exist in several
+                     * accounts (for example Google + Samsung), which
+                     * previously produced Family / Friends /
+                     * Co-Workers three times. Merge equal titles into
+                     * one JARVIS category and filter against all of
+                     * the underlying Android group IDs.
+                     */
+                    Map<String, String> titles =
+                            new LinkedHashMap<>();
+
+                    Map<String, Set<Long>> mergedGroups =
+                            new LinkedHashMap<>();
+
+                    for (
+                            JarvisContactStore.GroupInfo group
+                            : JarvisContactStore
+                            .loadGroups(this)
+                    ) {
+                        String key =
+                                group.title
+                                        .trim()
+                                        .toLowerCase(
+                                                Locale.ROOT
+                                        );
+
+                        if (key.isEmpty()) {
+                            continue;
+                        }
+
+                        if (!titles.containsKey(key)) {
+                            titles.put(
+                                    key,
+                                    group.title
+                            );
+                        }
+
+                        Set<Long> ids =
+                                mergedGroups.get(key);
+
+                        if (ids == null) {
+                            ids =
+                                    new LinkedHashSet<>();
+
+                            mergedGroups.put(
+                                    key,
+                                    ids
+                            );
+                        }
+
+                        ids.add(group.id);
+                    }
+
+                    for (
+                            Map.Entry<String, Set<Long>> entry
+                            : mergedGroups.entrySet()
+                    ) {
+                        filters.addView(
+                                space(dp(7))
+                        );
+
+                        final Set<Long> ids =
+                                new LinkedHashSet<>(
+                                        entry.getValue()
+                                );
+
+                        String label =
+                                titles.get(
+                                        entry.getKey()
+                                );
+
+                        TextView groupChip =
+                                filterChip(
+                                        label,
+                                        !ids.isEmpty()
+                                                && selectedGroupIds
+                                                .equals(ids)
+                                );
+
+                        groupChip.setOnClickListener(
+                                v -> {
+                                    favoritesOnly = false;
+                                    selectedGroupIds.clear();
+                                    selectedGroupIds.addAll(
+                                            ids
+                                    );
+                                    showContacts();
+                                }
+                        );
+
+                        filters.addView(
+                                groupChip
+                        );
+                    }
+                };
+
+        rebuildFilters.run();
 
         search.addTextChangedListener(
                 new android.text.TextWatcher() {
@@ -343,7 +560,7 @@ public final class JarvisDialerActivity extends Activity {
                     int before,
                     int count
             ) {
-                reload.run();
+                render.run();
             }
 
             @Override
@@ -353,7 +570,7 @@ public final class JarvisDialerActivity extends Activity {
             }
         });
 
-        reload.run();
+        render.run();
     }
 
     private void showKeypad(String initialNumber) {
@@ -882,12 +1099,53 @@ public final class JarvisDialerActivity extends Activity {
         } catch (SecurityException ignored) {
         }
 
+        Map<Long, Set<Long>> memberships =
+                JarvisContactStore
+                        .loadMemberships(this);
+
+        for (Map.Entry<Long, ContactRow> entry
+                : contacts.entrySet()) {
+            Set<Long> groups =
+                    memberships.get(
+                            entry.getKey()
+                    );
+
+            if (groups != null) {
+                entry.getValue()
+                        .groupIds
+                        .addAll(groups);
+            }
+        }
+
         List<ContactRow> rows =
                 new ArrayList<>();
 
         for (ContactRow row : contacts.values()) {
             if (row.numbers.isEmpty()) {
                 continue;
+            }
+
+            if (favoritesOnly
+                    && !row.starred) {
+                continue;
+            }
+
+            if (!selectedGroupIds.isEmpty()) {
+                boolean groupMatch = false;
+
+                for (Long groupId
+                        : selectedGroupIds) {
+                    if (row.groupIds.contains(
+                            groupId
+                    )) {
+                        groupMatch = true;
+                        break;
+                    }
+                }
+
+                if (!groupMatch) {
+                    continue;
+                }
             }
 
             if (!cleanFilter.isEmpty()
@@ -973,7 +1231,9 @@ public final class JarvisDialerActivity extends Activity {
                         ContactsContract.Contacts
                                 .IN_VISIBLE_GROUP,
                         ContactsContract.Contacts
-                                .IN_DEFAULT_DIRECTORY
+                                .IN_DEFAULT_DIRECTORY,
+                        ContactsContract.Contacts
+                                .STARRED
                 };
 
         String selection =
@@ -1026,6 +1286,12 @@ public final class JarvisDialerActivity extends Activity {
                                     .LOOKUP_KEY
                     );
 
+            int starredIndex =
+                    cursor.getColumnIndex(
+                            ContactsContract.Contacts
+                                    .STARRED
+                    );
+
             while (cursor.moveToNext()) {
                 long id =
                         idIndex < 0
@@ -1073,7 +1339,11 @@ public final class JarvisDialerActivity extends Activity {
                                         ? "Unnamed contact"
                                         : name,
                                 photoUri,
-                                lookupKey
+                                lookupKey,
+                                starredIndex >= 0
+                                        && cursor.getInt(
+                                        starredIndex
+                                ) != 0
                         )
                 );
             }
@@ -1104,7 +1374,9 @@ public final class JarvisDialerActivity extends Activity {
 
         LinearLayout text =
                 rowTextBlock(
-                        row.name,
+                        row.starred
+                                ? "★  " + row.name
+                                : row.name,
                         subtitle
                 );
 
@@ -1120,7 +1392,7 @@ public final class JarvisDialerActivity extends Activity {
         if (showManage) {
             TextView manage =
                     chip(
-                            "MANAGE",
+                            "DETAILS",
                             CARD_2,
                             TEXT
                     );
@@ -1230,10 +1502,12 @@ public final class JarvisDialerActivity extends Activity {
         frame.setLayoutParams(lp);
 
         Bitmap bitmap =
-                JarvisCallerIdentity.loadPhoto(
-                        this,
-                        row.photoUri
-                );
+                JarvisContactStore
+                        .loadContactPhoto(
+                                this,
+                                row.contactId,
+                                row.photoUri
+                        );
 
         if (bitmap != null) {
             ImageView image =
@@ -1480,48 +1754,34 @@ public final class JarvisDialerActivity extends Activity {
     }
 
     private void addContact() {
-        Intent intent =
+        contactsRefreshOnResume = true;
+
+        startActivity(
                 new Intent(
-                        Intent.ACTION_INSERT,
-                        ContactsContract.Contacts
-                                .CONTENT_URI
-                );
-        intent.setType(
-                ContactsContract.Contacts
-                        .CONTENT_TYPE
+                        this,
+                        JarvisContactEditorActivity.class
+                )
         );
-        startActivity(intent);
     }
 
     private void openContact(
             ContactRow row
     ) {
-        Uri uri;
+        contactsRefreshOnResume = true;
 
-        if (!row.lookupKey.isEmpty()) {
-            uri =
-                    ContactsContract.Contacts
-                            .getLookupUri(
-                                    row.contactId,
-                                    row.lookupKey
-                            );
-        } else {
-            uri =
-                    Uri.withAppendedPath(
-                            ContactsContract.Contacts
-                                    .CONTENT_URI,
-                            Long.toString(
-                                    row.contactId
-                            )
-                    );
-        }
-
-        startActivity(
+        Intent intent =
                 new Intent(
-                        Intent.ACTION_VIEW,
-                        uri
-                )
+                        this,
+                        JarvisContactEditorActivity.class
+                );
+
+        intent.putExtra(
+                JarvisContactEditorActivity
+                        .EXTRA_CONTACT_ID,
+                row.contactId
         );
+
+        startActivity(intent);
     }
 
     private void deleteOne(EditText field) {
@@ -1698,6 +1958,25 @@ public final class JarvisDialerActivity extends Activity {
                         0
                 )
         );
+    }
+
+    private TextView filterChip(
+            String label,
+            boolean selected
+    ) {
+        TextView view =
+                chip(
+                        label,
+                        selected
+                                ? ORANGE
+                                : CARD_2,
+                        selected
+                                ? Color.WHITE
+                                : TEXT
+                );
+
+        view.setTextSize(11f);
+        return view;
     }
 
     private TextView navItem(
@@ -2117,6 +2396,9 @@ public final class JarvisDialerActivity extends Activity {
         final String name;
         final String photoUri;
         final String lookupKey;
+        final boolean starred;
+        final Set<Long> groupIds =
+                new LinkedHashSet<>();
         final List<PhoneEntry> numbers =
                 new ArrayList<>();
 
@@ -2124,12 +2406,14 @@ public final class JarvisDialerActivity extends Activity {
                 long contactId,
                 String name,
                 String photoUri,
-                String lookupKey
+                String lookupKey,
+                boolean starred
         ) {
             this.contactId = contactId;
             this.name = name;
             this.photoUri = photoUri;
             this.lookupKey = lookupKey;
+            this.starred = starred;
         }
     }
 
