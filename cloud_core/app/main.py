@@ -20,6 +20,7 @@ from fastapi import (
 )
 
 from .device_bus import device_manager
+from .claude_skill_router import try_handle_claude_skill
 from .phone_action_router import try_handle_phone_action
 from .device_events import device_event_store
 from .caller_intelligence import CallerIntelligence
@@ -179,6 +180,13 @@ async def _assistant_chat(
     if phone_action is not None:
         return phone_action
 
+
+    claude_skill = await try_handle_claude_skill(
+        text=body.text,
+        source_device=source_device,
+    )
+    if claude_skill is not None:
+        return claude_skill
     gate = memory_store.process_user_text(
         body.text,
         source_device=source_device,

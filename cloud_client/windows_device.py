@@ -238,6 +238,13 @@ async def process_job(
     }
 
     try:
+        if job_type == "claude_code":
+            from services.claude_orchestrator import run_skill as run_claude_skill
+            claude_result = await asyncio.to_thread(run_claude_skill, payload)
+            claude_result["type"] = "job_result"
+            claude_result["job_id"] = job_id
+            return claude_result
+
         if job_type == "reasoning":
             worker_result = await asyncio.to_thread(
                 run_local_reasoning,
