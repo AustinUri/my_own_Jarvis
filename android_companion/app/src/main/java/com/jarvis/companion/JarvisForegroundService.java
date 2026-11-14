@@ -21,6 +21,11 @@ import okhttp3.WebSocketListener;
 
 public final class JarvisForegroundService extends Service {
 
+    // JARVIS_UNLOCK_CALL_BRIEFING_V1
+    // Speak only unresolved NEW missed calls when the user unlocks the phone.
+    private android.content.BroadcastReceiver jarvisUnlockBriefingReceiver;
+
+
     public static final String ACTION_PHONE_STATE_EVENT =
             "com.jarvis.companion.PHONE_STATE_EVENT";
 
@@ -65,6 +70,27 @@ public final class JarvisForegroundService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+
+        // JARVIS_UNLOCK_CALL_BRIEFING_REGISTER
+        UnlockCallBriefing.initializeBaseline(this);
+
+        jarvisUnlockBriefingReceiver = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(android.content.Context context, android.content.Intent intent) {
+                if (intent == null) return;
+                if (!android.content.Intent.ACTION_USER_PRESENT.equals(intent.getAction())) return;
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                        () -> UnlockCallBriefing.onUserPresent(JarvisForegroundService.this),
+                        1200L
+                );
+            }
+        };
+
+        registerReceiver(
+                jarvisUnlockBriefingReceiver,
+                new android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT)
+        );
+
         createChannel();
     }
 
@@ -651,6 +677,16 @@ return out;
                 return;
             }
 
+            // JARVIS_ORACLE_CALLER_CACHE_V1
+            // Persist the trusted Oracle identity before any live-TTS/sound-mode logic.
+            OracleCallerMemoryCache.remember(
+                    this,
+                    learnedNumber,
+                    learnedName,
+                    message.optString("source", ""),
+                    message.optString("provider", "")
+            );
+
             callReactionHandler.post(() -> {
 
                 // If there is no pending announcement, the call
@@ -1081,6 +1117,8 @@ return out;
                 );
             }
 
+            JarvisSpeechLocale.applyToTts(callTts, speech);
+
             callTts.speak(
                     speech,
                     android.speech.tts.TextToSpeech.QUEUE_FLUSH,
@@ -1341,7 +1379,18 @@ return out;
 
         client.dispatcher().executorService().shutdown();
 
-        super.onDestroy();
+                // JARVIS_UNLOCK_CALL_BRIEFING_CLEANUP
+        if (jarvisUnlockBriefingReceiver != null) {
+            try {
+                unregisterReceiver(jarvisUnlockBriefingReceiver);
+            } catch (Exception ignored) {
+            }
+            jarvisUnlockBriefingReceiver = null;
+        }
+
+        UnlockCallBriefing.shutdown();
+
+super.onDestroy();
     }
 
     @Override

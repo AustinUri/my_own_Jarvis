@@ -24,7 +24,7 @@ public final class MainActivity extends Activity {
     private static final int REQ_VOICE_INPUT = 3002;
 
     private PhoneApiClient api;
-    private EditText pairCode;
+
     private EditText askText;
     private TextView status;
     private TextView jarvisReply;
@@ -37,8 +37,11 @@ public final class MainActivity extends Activity {
 
         setContentView(R.layout.activity_main);
 
+        // JARVIS_REMOVE_LEGACY_PAIRING_UI_V2
+        // Legacy numeric pairing UI removed. Normal operation uses the
+        // existing Oracle device credential / Device Bus connection.
+
         api = new PhoneApiClient(this);
-        pairCode = findViewById(R.id.pairCode);
         askText = findViewById(R.id.askText);
         status = findViewById(R.id.statusText);
         jarvisReply = findViewById(R.id.jarvisReply);
@@ -46,10 +49,6 @@ public final class MainActivity extends Activity {
 
         findViewById(R.id.testConnectionButton)
                 .setOnClickListener(v -> testCloud());
-
-        findViewById(R.id.pairButton)
-                .setOnClickListener(v -> pair());
-
         findViewById(R.id.askButton)
                 .setOnClickListener(v -> askJarvis(
                         askText.getText().toString()
@@ -109,39 +108,7 @@ public final class MainActivity extends Activity {
         }, "jarvis-cloud-test").start();
     }
 
-    private void pair() {
-        String code = pairCode.getText().toString().trim();
-        setStatus("Pairing Samsung with JARVIS Cloud…");
-
-        new Thread(() -> {
-            try {
-                JSONObject result = api.pair(code);
-
-                runOnUiThread(() -> {
-                    setStatus(
-                            "Paired successfully.\n" +
-                            "Device: " + result.optString(
-                                    "device_id",
-                                    PhoneApiClient.DEVICE_ID
-                            ) +
-                            "\nStarting Oracle Device Bus…"
-                    );
-
-                    ensurePermissions();
-                    startCloudLink();
-                });
-
-            } catch (Exception ex) {
-                runOnUiThread(() ->
-                        setStatus(
-                                "Pairing failed:\n" +
-                                ex.getMessage()
-                        ));
-            }
-        }, "jarvis-cloud-pair").start();
-    }
-
-    private void askJarvis(String text) {
+private void askJarvis(String text) {
         String clean = text == null ? "" : text.trim();
         if (clean.isEmpty()) {
             jarvisReply.setText("Enter a message for JARVIS.");

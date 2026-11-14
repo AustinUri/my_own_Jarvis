@@ -45,30 +45,12 @@
             android:textColor="#D9F7FF"
             android:textIsSelectable="true" />
 
-        <EditText
-            android:id="@+id/pairCode"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:hint="6-digit cloud pairing code"
-            android:inputType="number"
-            android:maxLength="6"
-            android:textColor="#EAFBFF"
-            android:textColorHint="#68808F" />
-
         <Button
             android:id="@+id/testConnectionButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:text="TEST JARVIS CLOUD" />
-
-        <Button
-            android:id="@+id/pairButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="PAIR WITH JARVIS CLOUD" />
 
         <TextView
             android:layout_width="match_parent"

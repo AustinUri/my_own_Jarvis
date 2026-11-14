@@ -20,7 +20,7 @@
 
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
-<application android:allowBackup="false" android:label="JARVIS Companion" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.JarvisCompanion">
+<application android:allowBackup="false" android:label="JARVIS Companion" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.JarvisCompanion" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
