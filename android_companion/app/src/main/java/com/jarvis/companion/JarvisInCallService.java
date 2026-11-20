@@ -11,6 +11,8 @@ import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.telecom.Call;
 import android.telecom.CallAudioState;
 import android.telecom.InCallService;
@@ -18,6 +20,8 @@ import android.util.Log;
 import android.telecom.VideoProfile;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -83,6 +87,19 @@ public final class JarvisInCallService
 
     private static volatile Call currentCall;
 
+    // All keypad operations and Telecom callbacks run on the main thread.
+    private static final Handler dtmfHandler = new Handler(Looper.getMainLooper());
+    private static final ArrayDeque<Character> dtmfQueue = new ArrayDeque<>();
+    private static final long DTMF_TONE_MS = 180L;
+    private static final long DTMF_GAP_MS = 80L;
+    private static Call dtmfTarget;
+    private static boolean dtmfRunning;
+    private static boolean dtmfTonePlaying;
+    // Ephemeral, per-call history; never logged or sent to the cloud.
+    private static final IdentityHashMap<Call, StringBuilder> dtmfHistory =
+            new IdentityHashMap<>();
+    private static final int DTMF_HISTORY_LIMIT = 64;
+
     private static volatile JarvisCallerIdentity.Result
             currentIdentity =
             new JarvisCallerIdentity.Result(
@@ -110,6 +127,9 @@ public final class JarvisInCallService
                 Call call,
                 int state
         ) {
+            if (call == dtmfTarget && state != Call.STATE_ACTIVE) {
+                stopDtmf();
+            }
             logTopology("state-changed:" + state);
             selectForegroundCall();
             refreshCurrentSnapshot();
@@ -218,8 +238,10 @@ public final class JarvisInCallService
 
     @Override
     public void onDestroy() {
+        stopDtmf();
         instance = null;
         calls.clear();
+        dtmfHistory.clear();
         currentCall = null;
         cancelNotification();
         super.onDestroy();
@@ -248,12 +270,16 @@ public final class JarvisInCallService
     @Override
     public void onCallRemoved(Call call) {
         if (call != null) {
+            if (call == dtmfTarget) {
+                stopDtmf();
+            }
             try {
                 call.unregisterCallback(callback);
             } catch (Exception ignored) {
             }
 
             calls.remove(call);
+            dtmfHistory.remove(call);
         }
 
         logTopology("call-removed");
@@ -453,8 +479,38 @@ public final class JarvisInCallService
         return true;
     }
 
+    @SuppressWarnings("deprecation")
+    private static CallAudioState confirmedAudioState() {
+        JarvisInCallService service = instance;
+        if (service == null || currentCall == null) {
+            return null;
+        }
+        return service.getCallAudioState();
+    }
+
     public static boolean isMuted() {
-        return muted;
+        CallAudioState state = confirmedAudioState();
+        return state != null && state.isMuted();
+    }
+
+    public static boolean hasConfirmedAudioState() {
+        return confirmedAudioState() != null;
+    }
+
+    public static String audioStatusLabel() {
+        CallAudioState state = confirmedAudioState();
+        if (state == null) {
+            return "Mic status unknown";
+        }
+        String route;
+        switch (state.getRoute()) {
+            case CallAudioState.ROUTE_BLUETOOTH: route = "Bluetooth"; break;
+            case CallAudioState.ROUTE_WIRED_HEADSET: route = "Headset"; break;
+            case CallAudioState.ROUTE_SPEAKER: route = "Speaker"; break;
+            case CallAudioState.ROUTE_EARPIECE: route = "Earpiece"; break;
+            default: route = "Other audio route";
+        }
+        return (state.isMuted() ? "MIC MUTED" : "MIC UNMUTED") + "  •  " + route;
     }
 
     public static boolean toggleMute() {
@@ -466,21 +522,23 @@ public final class JarvisInCallService
             return false;
         }
 
-        boolean target =
-                !muted;
-
-        service.setMuted(target);
-
-        // Optimistic UI update; platform callback will confirm.
-        muted = target;
-        broadcastUiUpdateStatic();
-
-        return true;
+        CallAudioState state = confirmedAudioState();
+        if (state == null) {
+            return false;
+        }
+        try {
+            service.setMuted(!state.isMuted());
+            // onCallAudioStateChanged confirms the actual state.
+            return true;
+        } catch (RuntimeException ex) {
+            Log.w(LOG_TAG, "Could not change microphone mute state", ex);
+            return false;
+        }
     }
 
     public static boolean isSpeakerOn() {
-        return audioRoute
-                == CallAudioState.ROUTE_SPEAKER;
+        CallAudioState state = confirmedAudioState();
+        return state != null && state.getRoute() == CallAudioState.ROUTE_SPEAKER;
     }
 
     @SuppressWarnings("deprecation")
@@ -493,28 +551,25 @@ public final class JarvisInCallService
             return false;
         }
 
-        if (isSpeakerOn()) {
-            int target =
-                    bestPrivateRoute();
-
-            service.setAudioRoute(target);
-            audioRoute = target;
-
-        } else {
-            routeBeforeSpeaker =
-                    audioRoute;
-
-            service.setAudioRoute(
-                    CallAudioState.ROUTE_SPEAKER
-            );
-
-            audioRoute =
-                    CallAudioState.ROUTE_SPEAKER;
+        CallAudioState state = confirmedAudioState();
+        if (state == null) {
+            return false;
         }
-
-        broadcastUiUpdateStatic();
-
-        return true;
+        try {
+            if (state.getRoute() == CallAudioState.ROUTE_SPEAKER) {
+                service.setAudioRoute(bestPrivateRoute());
+            } else {
+                if ((state.getSupportedRouteMask() & CallAudioState.ROUTE_SPEAKER) == 0) {
+                    return false;
+                }
+                routeBeforeSpeaker = state.getRoute();
+                service.setAudioRoute(CallAudioState.ROUTE_SPEAKER);
+            }
+            return true;
+        } catch (RuntimeException ex) {
+            Log.w(LOG_TAG, "Could not change call audio route", ex);
+            return false;
+        }
     }
 
     public static boolean canHoldCurrentCall() {
@@ -807,49 +862,87 @@ public final class JarvisInCallService
         return null;
     }
 
-    public static boolean playDtmf(
-            char digit
-    ) {
-        if (!(
-                (digit >= '0' && digit <= '9')
-                        || digit == '*'
-                        || digit == '#'
-        )) {
+    public static boolean playDtmf(char digit) {
+        if (!((digit >= '0' && digit <= '9') || digit == '*' || digit == '#')) {
             return false;
         }
-
-        Call call =
-                findCallInState(
-                        Call.STATE_ACTIVE
-                );
-
-        if (call == null) {
-            call = currentCall;
-        }
-
-        if (call == null
-                || call.getState()
-                != Call.STATE_ACTIVE) {
+        Call call = currentCall;
+        // Never silently send keypad digits to a different call.
+        if (call == null || call.getState() != Call.STATE_ACTIVE) {
             return false;
         }
-
-        call.playDtmfTone(digit);
+        if (dtmfTarget != null && dtmfTarget != call) {
+            stopDtmf();
+        }
+        if (dtmfQueue.size() >= 16) {
+            return false;
+        }
+        dtmfTarget = call;
+        dtmfQueue.addLast(digit);
+        if (!dtmfRunning) {
+            dtmfRunning = true;
+            return playNextDtmf();
+        }
         return true;
     }
 
+    public static String currentDtmfHistory() {
+        StringBuilder history = dtmfHistory.get(currentCall);
+        return history == null ? "" : history.toString();
+    }
+
+    public static void clearCurrentDtmfHistory() {
+        dtmfHistory.remove(currentCall);
+        broadcastUiUpdateStatic();
+    }
+
+    private static boolean playNextDtmf() {
+        Call call = dtmfTarget;
+        if (call == null || call.getState() != Call.STATE_ACTIVE
+                || call != currentCall || !calls.contains(call) || dtmfQueue.isEmpty()) {
+            stopDtmf();
+            return false;
+        }
+        try {
+            char digit = dtmfQueue.removeFirst();
+            call.playDtmfTone(digit);
+            dtmfTonePlaying = true;
+            StringBuilder history = dtmfHistory.computeIfAbsent(call, ignored -> new StringBuilder());
+            history.append(digit);
+            if (history.length() > DTMF_HISTORY_LIMIT) {
+                history.delete(0, history.length() - DTMF_HISTORY_LIMIT);
+            }
+            broadcastUiUpdateStatic();
+            dtmfHandler.postDelayed(() -> {
+                stopCurrentDtmfTone();
+                dtmfHandler.postDelayed(JarvisInCallService::playNextDtmf, DTMF_GAP_MS);
+            }, DTMF_TONE_MS);
+            return true;
+        } catch (RuntimeException ex) {
+            Log.w(LOG_TAG, "Could not play DTMF tone", ex);
+            stopDtmf();
+            setOperationMessage("Keypad tone failed; try again");
+            return false;
+        }
+    }
+
+    private static void stopCurrentDtmfTone() {
+        if (dtmfTarget != null && dtmfTonePlaying) {
+            try {
+                dtmfTarget.stopDtmfTone();
+            } catch (RuntimeException ex) {
+                Log.w(LOG_TAG, "Could not stop DTMF tone", ex);
+            }
+        }
+        dtmfTonePlaying = false;
+    }
+
     public static void stopDtmf() {
-        Call call =
-                findCallInState(
-                        Call.STATE_ACTIVE
-                );
-
-        if (call == null) {
-            call = currentCall;
-        }
-
-        if (call != null) {
-            call.stopDtmfTone();
-        }
+        dtmfHandler.removeCallbacksAndMessages(null);
+        stopCurrentDtmfTone();
+        dtmfQueue.clear();
+        dtmfTarget = null;
+        dtmfRunning = false;
     }
 
     public static String currentStateLabel() {
@@ -1188,6 +1281,9 @@ public final class JarvisInCallService
             }
         }
 
+        if (dtmfTarget != null && dtmfTarget != best) {
+            stopDtmf();
+        }
         currentCall = best;
     }
 

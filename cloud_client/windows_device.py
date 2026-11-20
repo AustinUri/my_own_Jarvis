@@ -9,6 +9,13 @@ from urllib.request import Request, urlopen
 
 import websockets
 
+# Support both module execution and the existing direct-script launcher.
+if not __package__:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from core.gaming_mode import require_local_ai_available
+
 
 DEVICE_ID = "uri-windows"
 DEVICE_TYPE = "windows"
@@ -61,6 +68,7 @@ def load_token() -> str:
 
 
 def run_local_reasoning(payload: dict) -> dict:
+    require_local_ai_available()
     text = str(payload.get("text") or "").strip()
 
     if not text:
@@ -120,6 +128,7 @@ def run_local_reasoning(payload: dict) -> dict:
         method="POST",
     )
 
+    require_local_ai_available()
     try:
         with urlopen(
             request,

@@ -8,6 +8,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.gaming_mode import require_local_ai_available
+
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 BASE_URL = os.getenv("JARVIS_LOCAL_AI_BASE_URL", "http://127.0.0.1:1234").rstrip("/")
 PORT = int(os.getenv("JARVIS_LOCAL_AI_PORT", "1234"))
@@ -111,6 +113,7 @@ def loaded_models() -> list[str]:
     return out
 
 def ensure_model(kind: str, *, ttl: int = DEFAULT_TTL, context: int = DEFAULT_CONTEXT) -> str:
+    require_local_ai_available()
     kind = (kind or "qwen").strip().lower()
     if kind not in MODEL_KEYS:
         raise ValueError(f"Unsupported local model kind: {kind}")
@@ -124,6 +127,7 @@ def ensure_model(kind: str, *, ttl: int = DEFAULT_TTL, context: int = DEFAULT_CO
         "--context-length", str(context),
         "--ttl", str(ttl),
     ]
+    require_local_ai_available()
     cp = _run(cmd, timeout=180)
     if cp.returncode != 0:
         raise RuntimeError(
@@ -140,6 +144,7 @@ class RuntimeLease:
     started_server: bool
 
 def acquire(kind: str) -> RuntimeLease:
+    require_local_ai_available()
     started = start_server()
     try:
         model = ensure_model(kind)

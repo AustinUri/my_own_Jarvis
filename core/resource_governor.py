@@ -9,6 +9,8 @@ from typing import Any
 
 import psutil
 
+from core.gaming_mode import gaming_reason
+
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -60,6 +62,14 @@ class ResourceGovernor:
         return snap
 
     def _apply_policy(self, snap: ResourceSnapshot) -> None:
+        reason = gaming_reason()
+        if reason:
+            snap.state = "gaming"
+            snap.llm_parallel_limit = 0
+            snap.active_agent_limit = 1
+            snap.reason = reason + " New local LLM jobs are paused."
+            return
+
         if not bool(getattr(self.config, "resource_governor_enabled", True)):
             snap.state = "disabled"
             snap.reason = "Resource governor is disabled in Settings."

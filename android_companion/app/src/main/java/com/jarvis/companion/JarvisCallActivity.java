@@ -9,13 +9,16 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.telecom.Call;
+import android.text.TextUtils;
 import android.view.Gravity;
-import android.view.MotionEvent;
+import android.widget.Toast;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -25,6 +28,8 @@ import android.widget.GridLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Space;
+import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.List;
@@ -58,6 +63,10 @@ public final class JarvisCallActivity
             Color.rgb(239, 68, 68);
 
     private TextView stateView;
+    private TextView audioStatusView;
+    private TextView dtmfDigitsView;
+    private ToneGenerator keypadFeedback;
+    private boolean keySoundEnabled = true;
     private TextView nameView;
     private TextView numberView;
     private TextView sourceView;
@@ -154,6 +163,8 @@ public final class JarvisCallActivity
 
     @Override
     protected void onPause() {
+        JarvisInCallService.stopDtmf();
+        releaseKeypadFeedback();
         timerHandler.removeCallbacks(
                 timerTick
         );
@@ -173,6 +184,7 @@ public final class JarvisCallActivity
         }
 
         JarvisInCallService.stopDtmf();
+        releaseKeypadFeedback();
 
         super.onDestroy();
     }
@@ -261,6 +273,12 @@ public final class JarvisCallActivity
                 stateView,
                 stateParams
         );
+
+        audioStatusView = new TextView(this);
+        audioStatusView.setTextSize(13f);
+        audioStatusView.setGravity(Gravity.CENTER);
+        audioStatusView.setPadding(0, dp(8), 0, 0);
+        root.addView(audioStatusView, fullWidthWrap());
 
         FrameLayout avatar =
                 new FrameLayout(this);
@@ -490,12 +508,19 @@ public final class JarvisCallActivity
         hangParams.topMargin =
                 dp(14);
 
-        root.addView(
-                hangupRow,
-                hangParams
-        );
+        // Keep the hang-up control reachable even on a small display.
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(BG);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(root);
+        screen.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        hangupRow.setPadding(dp(24), dp(6), dp(24), dp(18));
+        screen.addView(hangupRow, hangParams);
 
-        return root;
+        return screen;
     }
 
     private void refresh() {
@@ -570,6 +595,8 @@ public final class JarvisCallActivity
         }
 
         updateStateLine();
+        updateAudioStatus();
+        updateDtmfDigits();
         renderCallStack();
         renderOperationMessage();
         rebuildActions();
@@ -613,6 +640,39 @@ public final class JarvisCallActivity
                         Locale.getDefault()
                 )
         );
+    }
+
+    private void updateAudioStatus() {
+        audioStatusView.setText(JarvisInCallService.audioStatusLabel());
+        audioStatusView.setTextColor(!JarvisInCallService.hasConfirmedAudioState()
+                ? MUTED : JarvisInCallService.isMuted() ? RED : GREEN);
+    }
+
+    private void updateDtmfDigits() {
+        String digits = JarvisInCallService.currentDtmfHistory();
+        dtmfDigitsView.setText(digits.isEmpty() ? "Enter digits" : digits);
+    }
+
+    private void playKeypadFeedback() {
+        if (!keySoundEnabled) return;
+        AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (audio == null || audio.getRingerMode() != AudioManager.RINGER_MODE_NORMAL) return;
+        try {
+            if (keypadFeedback == null) {
+                keypadFeedback = new ToneGenerator(AudioManager.STREAM_DTMF, 55);
+            }
+            // Local confirmation only, not another DTMF signal to the remote IVR.
+            keypadFeedback.startTone(ToneGenerator.TONE_PROP_BEEP, 65);
+        } catch (RuntimeException ignored) {
+            // Local feedback failure must not break the actual call or keypad.
+        }
+    }
+
+    private void releaseKeypadFeedback() {
+        if (keypadFeedback != null) {
+            keypadFeedback.release();
+            keypadFeedback = null;
+        }
     }
 
     private String formatDuration(
@@ -677,11 +737,12 @@ public final class JarvisCallActivity
                         : View.VISIBLE
         );
 
-        if (ringing) {
+        if (state != Call.STATE_ACTIVE) {
             keypadVisible = false;
-            dtmfPanel.setVisibility(
-                    View.GONE
-            );
+            dtmfPanel.setVisibility(View.GONE);
+        }
+
+        if (ringing) {
 
             ringingRow.addView(
                     callButton(
@@ -735,8 +796,9 @@ public final class JarvisCallActivity
                 JarvisInCallService
                         .isMuted(),
                 v -> {
-                    JarvisInCallService
-                            .toggleMute();
+                    if (!JarvisInCallService.toggleMute()) {
+                        Toast.makeText(this, "Microphone state unavailable", Toast.LENGTH_SHORT).show();
+                    }
                     refresh();
                 }
         );
@@ -1247,7 +1309,7 @@ public final class JarvisCallActivity
                 new TextView(this);
 
         title.setText(
-                "DTMF KEYPAD"
+                "DTMF KEYPAD • Last 64 digits submitted"
         );
         title.setTextColor(MUTED);
         title.setTextSize(11f);
@@ -1257,6 +1319,41 @@ public final class JarvisCallActivity
                 title,
                 fullWidthWrap()
         );
+
+        dtmfDigitsView = new TextView(this);
+        dtmfDigitsView.setTextColor(TEXT);
+        dtmfDigitsView.setTextSize(27f);
+        dtmfDigitsView.setTypeface(Typeface.MONOSPACE);
+        dtmfDigitsView.setGravity(Gravity.CENTER);
+        dtmfDigitsView.setTextDirection(View.TEXT_DIRECTION_LTR);
+        dtmfDigitsView.setSingleLine(true);
+        dtmfDigitsView.setEllipsize(TextUtils.TruncateAt.START);
+        dtmfDigitsView.setPadding(dp(6), dp(8), dp(6), dp(8));
+        panel.addView(dtmfDigitsView, fullWidthWrap());
+        updateDtmfDigits();
+
+        LinearLayout options = new LinearLayout(this);
+        options.setGravity(Gravity.CENTER_VERTICAL);
+        Switch sound = new Switch(this);
+        sound.setText("Key sound");
+        sound.setTextColor(TEXT);
+        sound.setChecked(keySoundEnabled);
+        sound.setOnCheckedChangeListener((button, checked) -> {
+            keySoundEnabled = checked;
+            if (!checked) releaseKeypadFeedback();
+        });
+        options.addView(sound, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView clear = new TextView(this);
+        clear.setText("Clear display");
+        clear.setTextColor(ORANGE);
+        clear.setPadding(dp(12), dp(12), dp(12), dp(12));
+        clear.setOnClickListener(v -> {
+            JarvisInCallService.clearCurrentDtmfHistory();
+            updateDtmfDigits();
+        });
+        options.addView(clear);
+        panel.addView(options, fullWidthWrap());
 
         GridLayout grid =
                 new GridLayout(this);
@@ -1294,46 +1391,14 @@ public final class JarvisCallActivity
                     )
             );
 
-            button.setOnTouchListener(
-                    (view, event) -> {
-                        String value =
-                                String.valueOf(
-                                        view.getTag()
-                                );
-
-                        if (value.isEmpty()) {
-                            return false;
-                        }
-
-                        char digit =
-                                value.charAt(0);
-
-                        if (event.getAction()
-                                == MotionEvent.ACTION_DOWN) {
-
-                            JarvisInCallService
-                                    .playDtmf(
-                                            digit
-                                    );
-
-                            return true;
-                        }
-
-                        if (event.getAction()
-                                == MotionEvent.ACTION_UP
-                                || event.getAction()
-                                == MotionEvent.ACTION_CANCEL) {
-
-                            JarvisInCallService
-                                    .stopDtmf();
-
-                            view.performClick();
-                            return true;
-                        }
-
-                        return true;
-                    }
-            );
+            button.setOnClickListener(view -> {
+                if (!JarvisInCallService.playDtmf(key.charAt(0))) {
+                    Toast.makeText(this, "Keypad unavailable for this call", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                playKeypadFeedback();
+                updateDtmfDigits();
+            });
 
             GridLayout.LayoutParams lp =
                     new GridLayout.LayoutParams();

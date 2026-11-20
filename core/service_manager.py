@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from core.gaming_mode import gaming_reason
 from core.user_paths import jarvis_data_dir
 from cloud_client.api import CloudApiClient
 
@@ -143,6 +144,9 @@ class ServiceManager:
             return None
 
     def _ensure_lm_studio(self) -> None:
+        if gaming_reason():
+            self._set('model', 'gaming-paused')
+            return
         models = self._lm_models()
         if models is None:
             lms = shutil.which('lms')
@@ -173,6 +177,9 @@ class ServiceManager:
             return
         model_key = str(getattr(self.config, 'ai_local_model_key', 'qwen/qwen3.5-9b'))
         context = str(int(getattr(self.config, 'ai_context_length', 16384)))
+        if gaming_reason():
+            self._set('model', 'gaming-paused')
+            return
         self.log(f'Loading {model_key} as {wanted}…')
         self._run_hidden([lms, 'load', model_key, '--identifier', wanted, '--context-length', context], timeout=120)
         refreshed = self._lm_models() or {}

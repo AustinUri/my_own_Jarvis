@@ -13,6 +13,8 @@ import android.service.notification.StatusBarNotification;
 
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class WhatsAppCallListenerService
         extends NotificationListenerService {
@@ -34,6 +36,8 @@ public final class WhatsAppCallListenerService
     }
 
 
+    private final Map<String, CallerInfo> ringingNotifications = new HashMap<>();
+
     @Override
     public void onNotificationPosted(
             StatusBarNotification sbn
@@ -47,6 +51,11 @@ public final class WhatsAppCallListenerService
                 sbn.getNotification();
 
         if (!looksLikeIncomingCall(notification)) {
+            finishRinging(sbn.getKey());
+            return;
+        }
+
+        if (ringingNotifications.containsKey(sbn.getKey())) {
             return;
         }
 
@@ -59,10 +68,8 @@ public final class WhatsAppCallListenerService
             return;
         }
 
-        sendCallState(
-                "ringing",
-                caller
-        );
+        ringingNotifications.put(sbn.getKey(), caller);
+        sendCallState("ringing", caller);
     }
 
 
@@ -75,20 +82,14 @@ public final class WhatsAppCallListenerService
             return;
         }
 
-        Notification notification =
-                sbn.getNotification();
+        finishRinging(sbn.getKey());
+    }
 
-        if (!looksLikeIncomingCall(notification)) {
-            return;
+    private void finishRinging(String key) {
+        CallerInfo caller = ringingNotifications.remove(key);
+        if (caller != null && ringingNotifications.isEmpty()) {
+            sendCallState("idle", caller);
         }
-
-        CallerInfo caller =
-                resolveCaller(notification.extras);
-
-        sendCallState(
-                "idle",
-                caller
-        );
     }
 
 
@@ -116,43 +117,52 @@ public final class WhatsAppCallListenerService
             return false;
         }
 
-        if (Notification.CATEGORY_CALL.equals(
-                notification.category
-        )) {
+        Bundle extras = notification.extras;
+        if (extras == null) {
+            return false;
+        }
+
+        // CATEGORY_CALL alone also covers outgoing and ongoing calls.
+        int callType = extras.getInt("android.callType", 0);
+        if (callType != 0) {
+            return callType == 1; // CallStyle.CALL_TYPE_INCOMING
+        }
+
+        String text = (value(extras, Notification.EXTRA_TEXT) + " "
+                + value(extras, Notification.EXTRA_SUB_TEXT) + " "
+                + value(extras, Notification.EXTRA_TITLE))
+                .toLowerCase(Locale.ROOT);
+        if (text.contains("outgoing") || text.contains("calling")
+                || text.contains("ongoing call") || text.contains("missed call")
+                || text.contains("שיחה יוצאת") || text.contains("מתקשר")
+                || text.contains("שיחה שלא נענתה") || text.contains("שיחה פעילה")) {
+            return false;
+        }
+        if (text.contains("incoming") && (text.contains("call")
+                || text.contains("voice") || text.contains("video"))) {
+            return true;
+        }
+        if (text.contains("שיחה נכנסת") || text.contains("שיחת קול נכנסת")
+                || text.contains("שיחת וידאו נכנסת")) {
             return true;
         }
 
-        Bundle extras = notification.extras;
-
-        String text =
-                (
-                        value(
-                                extras,
-                                Notification.EXTRA_TITLE
-                        )
-                                + " "
-                                + value(
-                                extras,
-                                Notification.EXTRA_TEXT
-                        )
-                                + " "
-                                + value(
-                                extras,
-                                Notification.EXTRA_SUB_TEXT
-                        )
-                ).toLowerCase(Locale.ROOT);
-
-        return (
-                text.contains("incoming")
-                        && (
-                        text.contains("call")
-                                || text.contains("voice")
-                                || text.contains("video")
-                )
-        )
-                || text.contains("\u05e9\u05d9\u05d7\u05d4 \u05e0\u05db\u05e0\u05e1\u05ea")
-                || text.contains("\u05e9\u05d9\u05d7\u05ea \u05e7\u05d5\u05dc")
-                || text.contains("\u05e9\u05d9\u05d7\u05ea \u05d5\u05d9\u05d3\u05d0\u05d5");
+        // Older notification layouts may only expose Answer/Decline actions.
+        boolean answer = false;
+        boolean decline = false;
+        if (notification.actions != null) {
+            for (Notification.Action action : notification.actions) {
+                String label = action.title == null ? "" :
+                        action.title.toString().trim().toLowerCase(Locale.ROOT);
+                answer |= label.equals("answer") || label.equals("accept")
+                        || label.equals("answer call") || label.equals("מענה")
+                        || label.equals("ענה") || label.equals("קבל");
+                decline |= label.equals("decline") || label.equals("reject")
+                        || label.equals("decline call") || label.equals("דחה")
+                        || label.equals("דחייה");
+            }
+        }
+        return answer && decline;
     }
 
 

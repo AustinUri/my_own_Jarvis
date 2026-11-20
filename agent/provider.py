@@ -7,6 +7,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from core.gaming_mode import gaming_reason, is_local_endpoint
+
 
 class ProviderError(RuntimeError):
     pass
@@ -67,6 +69,13 @@ class OpenAICompatibleProvider:
         temperature: float = 0.35,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
+        def check_gaming_mode() -> None:
+            if is_local_endpoint(self.base_url):
+                reason = gaming_reason()
+                if reason:
+                    raise ProviderError(reason + " Local AI is paused; retry after gaming.")
+
+        check_gaming_mode()
         model = self.resolve_model()
 
         # V30 Phase 1: local Windows reasoning reads the same canonical Oracle
@@ -110,6 +119,7 @@ class OpenAICompatibleProvider:
             raise ProviderError("Local AI concurrency guard is busy; try again in a moment.")
         try:
             try:
+                check_gaming_mode()
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:
                     raw = json.loads(response.read().decode("utf-8"))
             finally:
