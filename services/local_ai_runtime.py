@@ -77,28 +77,50 @@ def stop_server_if_owned(started_by_us: bool) -> None:
     except Exception:
         pass
 
-def models() -> list[str]:
+def loaded_models() -> list[str]:
     import json
-    with urllib.request.urlopen(BASE_URL + "/v1/models", timeout=4) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    return [
-        str(x.get("id"))
-        for x in data.get("data", [])
-        if isinstance(x, dict) and x.get("id")
-    ]
+
+    cp = _run([_lms(), "ps", "--json"], timeout=15)
+    if cp.returncode != 0:
+        raise RuntimeError(
+            "Could not query loaded LM Studio models: "
+            + (cp.stderr or cp.stdout or "unknown error").strip()
+        )
+
+    try:
+        data = json.loads(cp.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "LM Studio returned invalid JSON from `lms ps --json`."
+        ) from exc
+
+    if not isinstance(data, list):
+        return []
+
+    out = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        ident = (
+            item.get("identifier")
+            or item.get("modelKey")
+            or item.get("indexedModelIdentifier")
+        )
+        if ident:
+            out.append(str(ident))
+    return out
 
 def ensure_model(kind: str, *, ttl: int = DEFAULT_TTL, context: int = DEFAULT_CONTEXT) -> str:
     kind = (kind or "qwen").strip().lower()
     if kind not in MODEL_KEYS:
         raise ValueError(f"Unsupported local model kind: {kind}")
     key = MODEL_KEYS[kind]
-    if key in models():
+    if key in loaded_models():
         return key
 
     cmd = [
         _lms(), "load", key,
         "--identifier", key,
-        "--gpu", "auto",
         "--context-length", str(context),
         "--ttl", str(ttl),
     ]
@@ -108,7 +130,7 @@ def ensure_model(kind: str, *, ttl: int = DEFAULT_TTL, context: int = DEFAULT_CO
             f"Could not load {key}: "
             + (cp.stderr or cp.stdout or "unknown error").strip()
         )
-    if key not in models():
+    if key not in loaded_models():
         raise RuntimeError(f"LM Studio did not expose loaded model {key}.")
     return key
 
