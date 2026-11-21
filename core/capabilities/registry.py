@@ -42,6 +42,25 @@ PACKS = ROOT / ".jarvis" / "skill-fabric" / "packs"
 
 
 CAPABILITIES: dict[str, Capability] = {
+    # Project-owned first-party skills; their source lives inside this Git repo.
+    # These are NOT harvested third-party packs.
+    "youtube-video-factory": Capability(
+        name="youtube-video-factory",
+        kind="skill",
+        source="jarvis-project",
+        local_path=ROOT / "skills" / "youtube-video-factory",
+        load_mode="on-demand",
+        trust="trusted",
+    ),
+    "website-factory": Capability(
+        name="website-factory",
+        kind="skill",
+        source="jarvis-project",
+        local_path=ROOT / "skills" / "website-factory",
+        load_mode="on-demand",
+        trust="trusted",
+    ),
+
     "superpowers": Capability(
         name="superpowers",
         kind="skill",

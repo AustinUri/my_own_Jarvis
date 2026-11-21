@@ -1,0 +1,11 @@
+{
+  "id": "youtube_autopilot",
+  "name": "JARVIS English Kids Video Factory",
+  "version": "0.1.0",
+  "entrypoint": "core.capabilities.youtube_autopilot.integration:execute",
+  "ui_status_action": "status",
+  "background_task_action": "tick",
+  "requires_setup": ["ffmpeg", "piper English model", "YouTube OAuth 2.0"],
+  "publication_default": "disabled",
+  "warning": "Requires adapter to actual JARVIS registry; manifest itself does not automatically register commands."
+}

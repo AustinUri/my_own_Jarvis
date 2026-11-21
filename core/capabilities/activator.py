@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import re
 import shutil
 from pathlib import Path
@@ -81,7 +82,37 @@ def _pack_id(capability_name: str) -> str:
     return capability.local_path.name
 
 
+def _project_source(capability_name: str) -> Path | None:
+    capability = get_capability(capability_name)
+    if capability is None or capability.source != "jarvis-project":
+        return None
+    if not capability.enabled or capability.local_path is None:
+        raise ActivationError(f"Project skill disabled or has no path: {capability_name}")
+    path = capability.local_path.resolve()
+    try:
+        path.relative_to((ROOT / "skills").resolve())
+    except ValueError as exc:
+        raise ActivationError("Project skill escapes repository skills directory") from exc
+    if not (path / "SKILL.md").is_file():
+        raise ActivationError(f"Project SKILL.md missing: {path}")
+    return path
+
+
+def _hash_files(path: Path, *, marker: str = ".jarvis-project-skill.json") -> dict[str, str]:
+    files = {}
+    for file in sorted(path.rglob("*")):
+        if file.is_symlink():
+            raise ActivationError("Project skill contains a symbolic link")
+        if file.is_file() and file.name != marker:
+            files[file.relative_to(path).as_posix()] = hashlib.sha256(file.read_bytes()).hexdigest()
+    return files
+
+
 def skills_for(capability_name: str) -> list[dict]:
+    local = _project_source(capability_name)
+    if local is not None:
+        return [{"name": capability_name, "source": "jarvis-project",
+                 "path": str((local / "SKILL.md").relative_to(ROOT).as_posix())}]
     pack_id = _pack_id(capability_name)
 
     return [
@@ -165,12 +196,13 @@ def activate(
     capability_name: str,
     requested_skill: str | None = None,
 ) -> Path:
-    state = capability_state(capability_name)
-
-    if state != "ready":
-        raise ActivationError(
-            f"{capability_name} is not ready: state={state}"
-        )
+    local = _project_source(capability_name)
+    if local is None:
+        state = capability_state(capability_name)
+        if state != "ready":
+            raise ActivationError(
+                f"{capability_name} is not ready: state={state}"
+            )
 
     entry = _resolve_skill(
         capability_name,
@@ -178,17 +210,18 @@ def activate(
     )
 
     relative_skill_file = Path(entry["path"])
-    source_dir = PACKS / relative_skill_file.parent
-
-    resolved_source = source_dir.resolve()
-    resolved_packs = PACKS.resolve()
-
-    try:
-        resolved_source.relative_to(resolved_packs)
-    except ValueError as exc:
-        raise ActivationError(
-            "Skill path escapes harvested pack directory"
-        ) from exc
+    if local is not None:
+        source_dir = local
+    else:
+        source_dir = PACKS / relative_skill_file.parent
+        resolved_source = source_dir.resolve()
+        resolved_packs = PACKS.resolve()
+        try:
+            resolved_source.relative_to(resolved_packs)
+        except ValueError as exc:
+            raise ActivationError(
+                "Skill path escapes harvested pack directory"
+            ) from exc
 
     if not source_dir.exists():
         raise ActivationError(
@@ -212,10 +245,46 @@ def activate(
 
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 
-    if destination.exists():
-        shutil.rmtree(destination)
-
-    shutil.copytree(source_dir, destination)
+    if local is not None:
+        # First-party skills have a dedicated name and refuse to clobber edits.
+        destination_name = "jarvis-project-" + _slug(capability_name)
+        destination = SKILLS_DIR / destination_name
+        marker = ".jarvis-project-skill.json"
+        source_hashes = _hash_files(source_dir)
+        if destination.exists():
+            recorded_path = destination / marker
+            if not recorded_path.is_file():
+                raise ActivationError(f"Existing project skill is not managed: {destination}")
+            recorded = json.loads(recorded_path.read_text(encoding="utf-8"))
+            if recorded.get("source") != capability_name or recorded.get("hashes") != _hash_files(destination):
+                raise ActivationError(f"Project skill was locally edited; refusing overwrite: {destination}")
+        # Copy to staging and then replace to avoid incomplete skill activation.
+        staging = SKILLS_DIR / (destination_name + ".installing")
+        if staging.exists():
+            raise ActivationError(f"Stale activation staging directory: {staging}")
+        shutil.copytree(source_dir, staging)
+        (staging / marker).write_text(
+            json.dumps({"source": capability_name, "hashes": source_hashes}, indent=2),
+            encoding="utf-8",
+        )
+        if destination.exists():
+            backup = SKILLS_DIR / (destination_name + ".previous")
+            if backup.exists():
+                shutil.rmtree(staging)
+                raise ActivationError(f"Previous activation backup exists: {backup}")
+            destination.rename(backup)
+            try:
+                staging.rename(destination)
+            except Exception:
+                backup.rename(destination)
+                raise
+            shutil.rmtree(backup)
+        else:
+            staging.rename(destination)
+    else:
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(source_dir, destination)
 
     manifest = _load_manifest()
 

@@ -12,6 +12,15 @@ class CapabilityRoute:
 
 
 ROUTES = {
+    "video-production": (
+        "youtube-video-factory",
+        "video-lens",
+    ),
+    "website-production": (
+        "website-factory",
+        "ui-ux-pro-max",
+        "anti-slop",
+    ),
     "coding": (
         "superpowers",
         "ponytail",
@@ -48,6 +57,18 @@ ROUTES = {
 
 
 KEYWORDS = {
+    "video-production": {
+        "youtube video", "youtube shorts", "cartoon", "animation", "animated video",
+        "video factory", "video autopilot", "create a video", "generate video",
+        "produce a video", "nori", "blink", "אנימציה", "סרטון", "סרטונים",
+        "יוטיוב", "פרק מצויר", "סרטוני ילדים",
+    },
+    "website-production": {
+        "build a website", "create a website", "make a website", "website factory",
+        "business website", "react website", "website demo", "generate website",
+        "lead discovery", "אתר לעסק", "אתר אינטרנט", "בניית אתר", "תבנה אתר",
+        "בנה אתר", "צור אתר", "דמו לאתר",
+    },
     "coding": {
         "code",
         "python",
@@ -130,7 +151,13 @@ def route_capabilities(
         for domain, keywords in KEYWORDS.items()
     }
 
-    domain = max(scores, key=scores.get)
+    # Explicit creation intents beat generic matches like 'website' (research)
+    # and 'design' (UI). This only SELECTS a capability; it does NOT execute it.
+    specialist_domains = ("video-production", "website-production")
+    domain = next(
+        (key for key in specialist_domains if scores[key] > 0),
+        max(scores, key=scores.get),
+    )
 
     if scores[domain] == 0:
         return CapabilityRoute(
