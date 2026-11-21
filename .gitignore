@@ -99,3 +99,39 @@ backups/
 # Revenue Track generated installer payloads
 payload/
 APPLY_V30_REVENUE_MVP_*.ps1
+
+# BEGIN JARVIS PROJECT SKILLS / RUNTIME SAFETY v0.6
+# Generated media, voice model files, YouTube OAuth and local creative drafts.
+/var/
+# Locally generated business demos and activity logs; not source code.
+/.jarvis/website-demos/
+/.jarvis/skill-fabric/active.json
+# Private YouTube tokens accidentally stored outside var/ must stay private.
+**/youtube_autopilot/client_secrets.json
+**/youtube_autopilot/token.json
+# END JARVIS PROJECT SKILLS / RUNTIME SAFETY v0.6
+
+# Local examples
+/examples/
+
+# JARVIS generated files, credentials and model weights (v0.7)
+/.jarvis/skill-fabric/packs/
+/.jarvis/skill-fabric/audit-inventory.json
+/tests/*.zip
+/tests/*.mp4
+/tests/*.wav
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.onnx
+*.onnx.json
+*.gguf
+*.safetensors
+*.ckpt
+**/youtube_autopilot/*oauth*.json
+*.pem
+*.p12
+*.pfx
+**/node_modules/
+**/.next/

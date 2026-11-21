@@ -620,3 +620,96 @@ Useful patterns to study include:
 
 Phase 6 remains the home for deeper OS portability and Windows -> Linux adaptation work.
 <!-- JARVIS_TODAY_DECISIONS_END -->
+
+<!-- BEGIN JARVIS PROJECT STATUS v0.7 (managed) -->
+## Updated JARVIS project status (21 Nov 2026)
+
+JARVIS is a personal, privacy-focused assistant spanning a Windows workstation, an Android phone companion, an Oracle cloud service, and optional locally hosted AI models. The repository also includes a **Revenue Track** for business website research/generation and a **Video Factory** for original English-language children's cartoon drafts.
+
+> **Repository status note — 21 November 2026.** This documentation reflects the source snapshot `JARVIS_MINI_REVIEW_20261121_142846.zip` and the successful v0.6 install reported on the user's PC. It is not a claim that every component has been end-to-end tested. For Hebrew project notes, see `README_HE.md` if present locally.
+
+## Architecture at a glance
+
+| Component | Purpose | Current caveat |
+|---|---|---|
+| `core/`, `agent/`, `services/` | Assistant orchestration, capabilities, providers and device integration | Actual running paths must be verified before production changes |
+| `cloud_core/`, `cloud_client/` | Cloud/device interoperability | Online availability depends on deployment and credentials |
+| `android_companion/` | Android phone client and call-related features | Device permissions and phone integration need on-device testing |
+| `core/capabilities/website_factory.py` and related modules | Evidence-first website research, approved facts and React site drafts | Not an automatically verified production deployment |
+| `core/capabilities/youtube_autopilot/` | Episode planning, local narration, animated MP4 drafts and QA | Current procedural renderer is **not publication quality** |
+| `core/capabilities/activator.py`, `registry.py`, `router.py` | Skill discovery, activation and capability routing | Local project-skill catalog has been tested; conversational/dashboard execution still requires integration testing |
+| `skills/` | First-party skills owned by this repository | Source and `SKILL.md` should be version controlled |
+| `tests/` | Regression and behavior tests | Test **source** belongs in Git; generated test outputs do not |
+
+## Video Factory — Nori & Blink (development, NOT auto-publishing)
+
+The first-party skill is at `skills/youtube-video-factory/SKILL.md`. Its implementation uses `core/capabilities/youtube_autopilot/`. The series uses original characters and English-language preschool scripts.
+
+From the repository root on Windows PowerShell:
+
+```powershell
+python -m core.capabilities.activator catalog youtube-video-factory
+python -m core.capabilities.youtube_autopilot.creative_factory status
+python -m core.capabilities.youtube_autopilot.creative_factory create --count 1 --backend offline --render
+```
+
+Optional local-AI writing (requires a running, compatible LM Studio server/model; no paid token API):
+
+```powershell
+python -m core.capabilities.youtube_autopilot.creative_factory create --count 1 --backend local-ai --render
+```
+
+The offline curated source has a **finite** number of story templates; it is not an infinite generator. The local-AI backend must validate new stories and avoid duplicates. The existing animation system produces simple procedural artwork, not high-quality cartoon acting. **A valid MP4, motion score, narration track, or passing unit test is not creative approval.**
+
+**Release rule:** no YouTube uploads or autonomous publishing until the visual engine is substantially improved, the story and visuals match, originality and child-safety are reviewed, audio/captions are checked, and the owner approves a release process. YouTube OAuth credentials, tokens, rendered media, queue data, voice models, and drafts must stay outside Git.
+
+A separately supplied `youtube_cartoon_upgrade.zip` (Manus) has been **reviewed as a prototype only**, not installed into the active renderer. See [`docs/VIDEO_FACTORY_MANUS_REVIEW.md`](docs/VIDEO_FACTORY_MANUS_REVIEW.md) for its features, limitations and a safe integration plan. Do **not** copy its `renderer.py` or `quality.py` over the JARVIS package: their content contracts are different.
+
+## Website Factory (development)
+
+The website capability includes local business evidence gathering, fact verification, and draft site generation. Relevant code includes `core/capabilities/website_factory.py`, `verified_facts.py`, `verified_website.py`, `creative_website.py`, `business_evidence.py` and `lead_discovery.py`; the project-owned skill is in `skills/website-factory/SKILL.md`.
+
+Do not publish claims about a real business without verification/approval. Generated demonstrations under `.jarvis/website-demos/` and local customer data are **not** source code and must not be committed.
+
+## Skills and tests
+
+```powershell
+python -m core.capabilities.activator catalog youtube-video-factory
+python -m core.capabilities.activator catalog website-factory
+python -m unittest discover -s tests -p test_repo_first_party_skills_v06.py -v
+```
+
+Source code, project-owned `SKILL.md` files, tests, and reproducible non-secret configuration examples belong in version control. Harvested skill caches, downloaded model weights, build directories, generated examples, local videos, logs, and secrets do not.
+
+## Git safety
+
+Review changes before committing; the active branch reported by the user is `feat/jarvis-unified-core`. Some new capabilities and tests are still **untracked** and must be staged deliberately after review. A local checkout being 'up to date with origin' does **not** mean these uncommitted changes are on the remote.
+
+```powershell
+git status --short
+git check-ignore -v examples/ var/ .jarvis/website-demos/
+git diff -- .gitignore README.md
+```
+
+For documentation changes only:
+
+```powershell
+git add -- .gitignore README.md docs/VIDEO_FACTORY_MANUS_REVIEW.md
+git diff --cached --stat
+git diff --cached --check
+```
+
+**Do not** use `git add -A`, `git clean -fd` or `git reset --hard` as shortcuts while untracked working code and deleted historical build scripts are being reconciled. `.gitignore` does not remove files already tracked, and does not guarantee a file contains no secrets. Run a secrets review before `git push`. Never commit `.env`, local `config.json`, OAuth credentials, device/user data, or raw conversation exports.
+
+Note: the repository intentionally tracks `workspace_ui/dist/` as a zero-build UI runtime. Do **not** add a blanket `dist/` ignore rule without checking that behavior.
+
+## Current priorities
+
+1. Preserve and version the actual working source safely.
+2. Finish JARVIS Skill Fabric activation and the runtime dispatcher integration.
+3. Replace the Video Factory's placeholder animation renderer with a reusable, varied character/scene system and visual QA.
+4. Validate the Website Factory's production output and evidence controls.
+5. Only then consider an explicitly approved publishing/automation workflow.
+
+This README describes the codebase as of the stated snapshot; revalidate commands and status after future upgrades.
+<!-- END JARVIS PROJECT STATUS v0.7 (managed) -->
