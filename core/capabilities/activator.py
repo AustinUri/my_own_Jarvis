@@ -84,7 +84,7 @@ def _pack_id(capability_name: str) -> str:
 
 def _project_source(capability_name: str) -> Path | None:
     capability = get_capability(capability_name)
-    if capability is None or capability.source != "jarvis-project":
+    if capability is None or getattr(capability, "source", None) != "jarvis-project":
         return None
     if not capability.enabled or capability.local_path is None:
         raise ActivationError(f"Project skill disabled or has no path: {capability_name}")
