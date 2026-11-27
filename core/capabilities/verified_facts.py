@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 MAX_BYTES = 32000
-STATUSES = {'approved_for_demo', 'unverified', 'conflicting'}
+STATUSES = {'approved_for_demo', 'source_verified_for_demo', 'unverified', 'conflicting'}
 KINDS = {'owner', 'official_site', 'directory', 'user', 'synthetic'}
 REQUIRED = ('name', 'category', 'city')
-OPTIONAL = ('address', 'phone', 'tagline')
+OPTIONAL = ('address', 'phone', 'tagline', 'whatsapp')
 
 
 def strict_json(raw: str):
@@ -62,6 +62,8 @@ class Fact:
         reference = clean_text(raw['source']['reference'], 500)
         if status not in STATUSES or kind not in KINDS:
             raise ValueError('Unknown status or source kind')
+        if status == 'source_verified_for_demo' and kind != 'official_site':
+            raise ValueError('Source-verified demo facts need a reviewed first-party source')
         if kind in {'official_site', 'directory'}:
             u = urlsplit(reference)
             if u.scheme not in {'http', 'https'} or not u.hostname or u.username or u.password:
@@ -72,7 +74,7 @@ class Fact:
 
     @property
     def usable(self):
-        return self.status == 'approved_for_demo'
+        return self.status in {'approved_for_demo', 'source_verified_for_demo'}
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,7 @@ class BusinessFacts:
         if type(raw['version']) is not int or raw['version'] != 1 or raw['language'] not in ('he', 'en'):
             raise ValueError('Unsupported facts version or language')
         exact_keys(raw['facts'], REQUIRED, OPTIONAL)
-        fields = tuple((k, Fact.parse(v, phone=k == 'phone')) for k, v in sorted(raw['facts'].items()))
+        fields = tuple((k, Fact.parse(v, phone=k in {'phone', 'whatsapp'})) for k, v in sorted(raw['facts'].items()))
         for k, fact in fields:
             if k in REQUIRED and not fact.usable:
                 raise ValueError(f'Required business fact not approved: {k}')
@@ -105,9 +107,16 @@ class BusinessFacts:
                 'services': [f.value for f in self.services if f.usable]}
 
     def report(self):
-        return {'approved_demo_fields': [k for k, f in self.fields if f.usable],
-                'withheld_fields': [k for k in OPTIONAL if not any(n == k and f.usable for n, f in self.fields)],
-                'approved_services': sum(f.usable for f in self.services),
+        sourced = [k for k, f in self.fields if f.status == 'source_verified_for_demo']
+        report = {'approved_demo_fields': [k for k, f in self.fields if f.status == 'approved_for_demo'],
+                'withheld_fields': [k for k in OPTIONAL if (k != 'whatsapp' or k in dict(self.fields))
+                                    and not any(n == k and f.usable for n, f in self.fields)],
+                'approved_services': sum(f.status == 'approved_for_demo' for f in self.services),
                 'withheld_services': sum(not f.usable for f in self.services),
                 'publication_approved': False,
                 'verification_scope': 'Human-supplied approvals for private demo, not independent verification'}
+        if sourced or any(f.status == 'source_verified_for_demo' for f in self.services):
+            report.update(source_verified_fields=sourced,
+                          source_verified_services=sum(f.status == 'source_verified_for_demo' for f in self.services),
+                          verification_scope='Private demo using attributed source review and any separate human approvals.')
+        return report

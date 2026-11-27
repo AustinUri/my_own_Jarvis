@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>מה קורה לפנייה חדשה בעסק?</title>
+<style>
+  * { box-sizing: border-box }
+  html { background: #f8f6f0; color: #172f2c; font: 100%/1.6 Arial, sans-serif }
+  body { max-width: 52rem; margin: auto; padding: clamp(1rem, 5vw, 3rem) }
+  h1, h2, p { margin: 0 }
+  h1 { font-size: clamp(2.1rem, 7vw, 3.6rem); line-height: 1.1; letter-spacing: -.035em; margin-block: .5em .3em }
+  header p { max-width: 40rem }
+  fieldset { min-width: 0; margin: 2rem 0 0; padding: 0; border: 0 }
+  legend { padding: 0 0 .35rem; font-size: 1.35rem; font-weight: bold }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) 9rem; align-items: center; gap: 1rem; border-top: 1px solid #b8c6be; padding: .75rem 0 }
+  select { width: 100%; min-height: 44px; font: inherit; padding: .3em .55em; border: 1px solid #62766e; border-radius: .3rem; background: white; color: inherit }
+  :focus-visible { outline: 3px solid #026e75; outline-offset: 3px }
+  section { margin: 2rem 0 1rem; padding: 1.25rem; background: #143d36; color: white; border-radius: .4rem }
+  section h2 { font-size: 1.2rem }
+  #advice { margin-block-start: .5rem }
+  footer { color: #425b52; font-size: .9rem }
+  a { color: inherit; text-underline-offset: .2em }
+  @media(max-width: 32rem) { .row { grid-template-columns: 1fr; gap: .35rem } }
+</style>
+<main>
+  <header>
+    <h1>מה קורה לפנייה חדשה בעסק?</h1>
+    <p>עברו על עשרת התהליכים וסמנו מה פועל אוטומטית בעסק היום. אם צריך לשאול מישהו או לבדוק במערכת, השאירו את הסעיף פתוח.</p>
+  </header>
+  <noscript>כדי למלא את השאלון ולחשב תוצאה, יש לאפשר JavaScript בדפדפן.</noscript>
+  <div id="questions"></div>
+  <fieldset id="intake" hidden>
+    <legend>לפני שמתחילים</legend>
+    <div class="row">
+      <label for="lead-route">האם ברור מאיפה מגיעות הפניות, מי מקבל אותן ומה קורה בהמשך?</label>
+      <select id="lead-route"><option value="">טרם בדקנו</option><option value="known">כן</option><option value="unclear">עדיין לא</option></select>
+    </div>
+  </fieldset>
+  <section aria-live="polite" aria-atomic="true">
+    <h2 id="score">טרם מולא השאלון</h2>
+    <p id="advice"></p>
+  </section>
+  <footer>התשובות משמשות לחישוב בדף הזה בלבד. השאלון מבוסס על <a href="https://drive.google.com/file/d/1G704-ex655IoMNflOVuNRBHfKBWO-fzh/view?usp=sharing" rel="noreferrer">הצ׳קליסט של הילה גנני</a> ועל ההנחיות ששלחה בעקבותיו.</footer>
+</main>
+<script>
+  const groups = [
+    ["קליטת פניות", [
+      ["whatsapp", "פונה חדש מקבל בוואטסאפ מענה ראשוני שמתאים לפנייה שלו."],
+      ["crm", "פניות מערוצי המכירה נכנסות ישירות למערכת ניהול הלקוחות."],
+      ["booking", "לקוחות יכולים לבחור זמן פנוי ולקבוע פגישה בעצמם."]]],
+    ["המשך שיחה ומכירה", [
+      ["email", "מי שנרשם לדיוור מקבל סדרת מיילים שנקבעה מראש."],
+      ["follow-up", "אחרי פגישה הלקוח מקבל סיכום ואת הצעד הבא שסוכם."],
+      ["social", "תגובה מתאימה ברשת חברתית מפעילה תשובה בהודעה פרטית."]]],
+    ["שירות ושימור", [
+      ["reminder", "לקוחות מקבלים תזכורת לקראת פגישה שנקבעה."],
+      ["review", "אחרי סיום השירות הלקוח מקבל הזמנה לכתוב ביקורת בגוגל."],
+      ["status", "הסטטוס במערכת ניהול הלקוחות מתעדכן בהתאם לפעולות של הפונה."]]],
+    ["מדידה", [
+      ["report", "מתקבל דוח שבועי על פניות, המקורות שלהן וכמה מהן הפכו ללקוחות."]]],
+  ];
+  const questions = document.getElementById("questions");
+  for (const [group, items] of groups) {
+    const fieldset = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = group;
+    fieldset.append(legend);
+    for (const [id, question] of items) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("label");
+      label.htmlFor = id;
+      label.textContent = question;
+      const select = document.createElement("select");
+      select.id = id;
+      select.add(new Option("טרם בדקנו", ""));
+      select.add(new Option("פועל", "yes"));
+      select.add(new Option("חסר", "no"));
+      row.append(label, select);
+      fieldset.append(row);
+    }
+    questions.append(fieldset);
+  }
+
+  const answers = Array.from(questions.querySelectorAll("select"));
+  const intake = document.getElementById("intake");
+  const route = document.getElementById("lead-route");
+  function update() {
+    const active = answers.filter(item => item.value === "yes").length;
+    const pending = answers.filter(item => item.value === "").length;
+    const score = document.getElementById("score");
+    const advice = document.getElementById("advice");
+    intake.hidden = pending > 0 || active > 3;
+    if (pending) {
+      score.textContent = pending === answers.length ? "טרם מולא השאלון" : "סומנו כפעילים: " + active;
+      advice.textContent = "סעיפים שעדיין פתוחים: " + pending + ". ההמלצה תופיע אחרי הבדיקה של כולם.";
+      return;
+    }
+    score.textContent = "תהליכים פעילים: " + active + " מתוך " + answers.length;
+    if (active <= 3) {
+      if (route.value !== "known") {
+        advice.textContent = "עקבו אחרי פנייה אחת מתחילתה ועד המענה. רשמו מאיפה הגיעה, אצל מי התקבלה ומה קרה אחר כך.";
+      } else if (document.getElementById("whatsapp").value === "no") {
+        advice.textContent = "התחילו במענה ראשוני בוואטסאפ לפנייה חדשה. בחרו מקור פניות אחד, נסחו תשובה מתאימה ובדקו כמה זמן עובר עד שהפונה מקבל אותה.";
+      } else {
+        advice.textContent = "המענה הראשוני בוואטסאפ כבר פועל. עברו על הפניות האחרונות ובדקו אם כל אחת קיבלה תשובה בזמן ועברה לאדם שמטפל בה.";
+      }
+    } else if (active <= 6) {
+      const next = [];
+      if (document.getElementById("follow-up").value === "no") next.push("הכינו תבנית לסיכום פגישה עם הצעד הבא שסוכם.");
+      if (document.getElementById("review").value === "no") next.push("הכינו בקשה קצרה לביקורת בגוגל אחרי השלמת השירות.");
+      advice.textContent = next.join(" ") || "שני התהליכים כבר פועלים. בדקו בפגישות ובעבודות האחרונות אם הסיכום והבקשה לביקורת הגיעו במועד המתאים.";
+    } else {
+      advice.textContent = "בחרו תהליך פעיל ותוצאה שאפשר למדוד, כמו זמן מענה או שיעור הגעה לפגישות. בדקו את הרישומים של השבוע האחרון כדי לראות אם התהליך משיג את התוצאה.";
+    }
+  }
+  questions.addEventListener("change", update);
+  route.addEventListener("change", update);
+  update();
+</script>
+</html>

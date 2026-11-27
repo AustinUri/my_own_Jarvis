@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "language": "he",
+  "facts": {
+    "name": {
+      "value": "מוסך אליאס בחוס",
+      "status": "approved_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    },
+    "category": {
+      "value": "מוסך רכב",
+      "status": "approved_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    },
+    "city": {
+      "value": "שפרעם",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    },
+    "phone": {
+      "value": "+97249869380",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/"
+      }
+    }
+  },
+  "services": [
+    {
+      "value": "תיקון ושיפוץ מנועים",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/"
+      }
+    },
+    {
+      "value": "תיקון ושיפוץ תיבות הילוכים",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    },
+    {
+      "value": "יבוא מנועי דיזל ובנזין",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/"
+      }
+    },
+    {
+      "value": "טיפול במיזוג האוויר ברכב",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    },
+    {
+      "value": "אבחון תקלות ברכב",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    },
+    {
+      "value": "הכנה לטסט",
+      "status": "source_verified_for_demo",
+      "source": {
+        "kind": "official_site",
+        "reference": "https://www.eliasmotors.co.il/אודות-המוסך"
+      }
+    }
+  ]
+}

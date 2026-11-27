@@ -324,7 +324,8 @@ def render(facts: BusinessFacts, plan: dict) -> dict[str, str]:
     plan = validate_plan(plan, facts)
     data = facts.render_data()
     # No model-authored text, code, URL, or CSS enters these files.
-    ts = ('export type Facts = { language: "he" | "en"; name: string; city: string; category: string; address?: string; phone?: string; tagline?: string; services: string[] };\n'
+    extra_contact = ' whatsapp?: string;' if 'whatsapp' in data else ''
+    ts = ('export type Facts = { language: "he" | "en"; name: string; city: string; category: string; address?: string; phone?: string;' + extra_contact + ' tagline?: string; services: string[] };\n'
           'export type Node = { kind: "field"; field: "name"|"city"|"category"|"address"|"tagline"; role: "display"|"heading"|"body"|"eyebrow"|"small" } | { kind: "group"; layout: string; items: Node[] } | { kind: "services"; variant: "list"|"grid"|"table" } | { kind: "contact"|"cta" } | { kind: "graphic"; variant: "none"|"monogram"|"technical"|"typographic" };\n'
           'export type PlanSection = { id: "hero"|"about"|"services"|"contact"; layout: string; tone: string; items: Node[] };\n'
           'export type Plan = { style: { typography: string; corners: string; spacing: string }; sections: PlanSection[] };\n'

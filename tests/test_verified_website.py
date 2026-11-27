@@ -179,6 +179,35 @@ class WebsiteTests(unittest.TestCase):
         self.assertEqual(r['layout_source'],'explicit');self.select.assert_not_called();self.infer.assert_not_called()
         self.assertIn('lang="en" dir="ltr"',(target/'index.html').read_text())
 
+    def test_commercial_source_is_repeatable_and_preserves_edited_work(self):
+        previous, path = self.fixture('commercial', document())
+        first = self.job('commercial', path, commercial=True)
+        dest = Path(first['output_directory'])
+        self.assertNotEqual(dest, previous)
+        self.assertEqual(first, self.job('commercial', path, commercial=True))
+        self.assertFalse(first['publication_approved'])
+        self.select.assert_not_called()
+        business = dest / 'src/business.json'
+        self.assertEqual(json.loads(business.read_text(encoding='utf8'))['name'], 'Test Garage')
+        business.write_text('hand edited', encoding='utf8')
+        with self.assertRaisesRegex(ValueError, 'Existing commercial source differs'):
+            self.job('commercial', path, commercial=True)
+        self.assertEqual(business.read_text(), 'hand edited')
+
+    def test_source_review_and_whatsapp_are_independent_of_owner_approval_and_phone(self):
+        raw = document()
+        phone = {'value': '+97249869380', 'status': 'source_verified_for_demo',
+                 'source': {'kind': 'official_site', 'reference': 'https://example.org/contact'}}
+        raw['facts']['phone'] = phone
+        raw['facts']['whatsapp'] = dict(phone, status='unverified')
+        facts = BusinessFacts.parse(raw)
+        self.assertNotIn('whatsapp', facts.render_data())
+        self.assertIn('phone', facts.report()['source_verified_fields'])
+        self.assertNotIn('phone', facts.report()['approved_demo_fields'])
+        raw['facts']['phone'] = dict(phone, source={'kind': 'synthetic', 'reference': 'a guess'})
+        with self.assertRaisesRegex(ValueError, 'first-party'):
+            BusinessFacts.parse(raw)
+
     def test_direct_legacy_requires_explicit_opt_in(self):
         with self.assertRaisesRegex(ValueError, 'unverified_draft'):
             wf.run('legacy','facts','title',approved=True,root=self.root,select=self.select)

@@ -217,6 +217,7 @@ def main() -> int:
     parser.add_argument('--title', help='Legacy unverified draft only')
     parser.add_argument('--facts-file', type=Path, help='Human-approved structured facts JSON')
     parser.add_argument('--approve-facts', action='store_true')
+    parser.add_argument('--commercial', action='store_true', help='Generate a static React business demo from reviewed evidence')
     parser.add_argument('--layout-file', type=Path, help='Optional validated visual contract, no AI')
     parser.add_argument('--creative', action='store_true', help='Model-composed React layout with approved-only facts (private preview)')
     parser.add_argument('--creative-plan-file', type=Path, help='Optional explicit creative layout JSON (no AI)')
@@ -225,6 +226,8 @@ def main() -> int:
     parser.add_argument('--switch-idle', action='store_true')
     args = parser.parse_args()
     try:
+        if args.commercial and (not args.facts_file or args.creative or args.layout_file or args.unverified_draft):
+            raise ValueError('--commercial requires structured facts and uses its own reviewed design')
         if args.creative and not args.facts_file:
             raise ValueError('--creative requires --facts-file')
         if args.creative_plan_file and not args.creative:
@@ -241,9 +244,10 @@ def main() -> int:
                                       plan_file=args.creative_plan_file)
             else:
                 from core.capabilities.verified_website import run as run_verified
+                options = {'commercial': True} if args.commercial else {}
                 result = run_verified(args.slug, args.facts_file, approved=args.approve_design,
                                       facts_approved=args.approve_facts, allow_switch=args.switch_idle,
-                                      layout_file=args.layout_file)
+                                      layout_file=args.layout_file, **options)
         elif args.unverified_draft and args.facts and args.title and not args.layout_file and not args.approve_facts:
             result = run(args.slug, args.facts, args.title, approved=args.approve_design, allow_switch=args.switch_idle, unverified_draft=True)
             result['publication_approved'] = False

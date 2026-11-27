@@ -17,7 +17,8 @@ WEBSITE_FACTORY = (
     Stage("discovery", ("israel-site-scout", "agent-browser", "marketing-skills/prospecting"),
           "Two independent public sources; no website found is not proof of absence; owner outreach requires approval."),
     Stage("strategy", ("marketing-skills/competitor-profiling", "marketing-skills/marketing-psychology"),
-          "Verified business details and a specific commercial goal."),
+          "Verified business details and a specific commercial goal. For an owner automation review, open "
+          "skills/website-factory/references/automation-review.html and use the owner's answers."),
     Stage("design", ("ui-ux-pro-max/ui-ux-pro-max", "ui-ux-pro-max/brand", "ui-ux-pro-max/design-system", "impeccable"),
           "Unique client design brief; no generic shared template."),
     Stage("content", ("marketing-skills/copywriting", "humanizer", "anti-slop/antislop-copywriting"),

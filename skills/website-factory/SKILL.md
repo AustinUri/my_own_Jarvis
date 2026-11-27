@@ -23,6 +23,13 @@ Project-owned in Git. Reuses existing `core/capabilities/website_factory.py`,
 5. Require mobile, visual, accessibility, source and security review.
 6. Never publish a business website or contact owners without explicit approval.
 
+During strategy, use the [private Hebrew automation worksheet](references/automation-review.html)
+when an owner wants to review lead handling. Open the file locally in a browser.
+Its ten questions follow Hila Ganani’s checklist and its priorities follow her accompanying email.
+Ask the owner which processes run today. Leave uncertain answers open until confirmed.
+The page calculates guidance locally and keeps answers in the current page.
+Keep this worksheet outside the public business website.
+
 CLI is existing JARVIS source code; read help before execution:
 
 ```powershell
@@ -39,3 +46,18 @@ ran, passed QA or was published.
 JARVIS capability registry/router only identify this skill. Automatic direct
 execution from natural language in the desktop dashboard still requires wiring
 its tool dispatcher in the live app; do NOT imply that routing equals execution.
+
+## Static commercial demo
+
+The commercial renderer uses the existing verified-facts contract. The reviewed Elias Motors record and its sources are in `examples/elias-motors/`. A verified phone number enables calling. WhatsApp requires its own verified number. The original brake-disc illustration is generated locally and depicts a component.
+
+```powershell
+python -m core.capabilities.website_factory --commercial --slug elias-motors-review --facts-file skills/website-factory/examples/elias-motors/facts.json --approve-design --approve-facts
+Set-Location .jarvis/website-demos/elias-motors-review/commercial-preview
+npm.cmd install --no-audit --no-fund
+npm.cmd run build
+```
+
+Open `dist/index.html` locally. The build prerenders the React components and structured data from the reviewed JSON. The public package consists of static HTML, CSS and local assets. It carries a private-demo notice and a search-engine exclusion. Review changes to the evidence before regenerating into a new slug. Existing source edits are protected.
+
+From the repository root, run the browser checks with `python -m core.capabilities.website_review --dist .jarvis/website-demos/elias-motors-review/commercial-preview/dist --facts skills/website-factory/examples/elias-motors/facts.json --out .jarvis/website-demos/elias-motors-review/review`. Choose a fresh output directory on each run. The report covers phone and desktop layouts, verified service and contact values, keyboard navigation, SEO metadata and local loading measurements.

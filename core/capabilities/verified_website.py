@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import re
 import sys
+import hashlib
+from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from core.capabilities.verified_facts import BusinessFacts, strict_json, exact_keys
@@ -185,7 +187,8 @@ def render(facts: BusinessFacts, layout: dict):
     data = facts.render_data()
     # JSON literals are data, not source expressions. Optional fields use a
     # declared type so missing facts do not cause TypeScript property errors.
-    ts = ('type Business = { language: "he" | "en"; name: string; category: string; city: string; address?: string; phone?: string; tagline?: string; services: string[] };\n'
+    extra_contact = ' whatsapp?: string;' if 'whatsapp' in data else ''
+    ts = ('type Business = { language: "he" | "en"; name: string; category: string; city: string; address?: string; phone?: string;' + extra_contact + ' tagline?: string; services: string[] };\n'
           'type Layout = { hero: "split" | "editorial" | "centered"; art: "lines" | "rings" | "grid"; sections: ("about" | "services" | "contact")[]; density: "airy" | "compact"; corners: "sharp" | "soft"; palette: Record<string,string> };\n'
           'export const facts: Business = ' + json.dumps(data, ensure_ascii=True) + ';\n'
           'export const layout: Layout = ' + json.dumps(layout, ensure_ascii=True) + ';\n')
@@ -194,8 +197,47 @@ def render(facts: BusinessFacts, layout: dict):
     return {'src/App.tsx': APP, 'src/site-data.ts': ts, 'src/styles.css': css}
 
 
+def commercial_source(project, facts, raw, scaffold):
+    from core.capabilities.website_factory import checked_path
+    source = Path(__file__).with_name('website_templates')
+    target = checked_path(project / 'commercial-preview')
+    data = facts.render_data()
+    files = {k: v.encode() for k, v in scaffold.items() if k not in ('src/main.tsx', 'index.html')}
+    ts = json.loads(files['tsconfig.json'])
+    ts['compilerOptions']['resolveJsonModule'] = True
+    files['tsconfig.json'] = json.dumps(ts, indent=2).encode()
+    files['src/business.json'] = (json.dumps(data, ensure_ascii=False, indent=2) + '\n').encode()
+    files['index.html'] = ('<!doctype html>\n<html><head><meta charset="utf-8"><meta name="viewport" '
+                           'content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">'
+                           '<link rel="stylesheet" href="/src/styles.css"></head><body><!--site--></body></html>').encode()
+    for name, output in [('CommercialApp.tsx', 'src/App.tsx'), ('commercial.css', 'src/styles.css'),
+                         ('brake-rotor.webp', 'public/assets/brake-rotor.webp'), ('static-build.mjs', 'vite.config.mjs')]:
+        files[output] = (source / name).read_bytes()
+    report = {'status': 'source_ready_for_private_build', 'output_directory': str(target),
+              'layout_source': 'reviewed_sector_template', 'publication_approved': False,
+              'fact_report': facts.report(), 'evidence_sha256': hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest(),
+              'rendered_code_sha256': {k: hashlib.sha256(v).hexdigest() for k, v in files.items()}}
+    files['commercial-build.json'] = (json.dumps(report, indent=2) + '\n').encode()
+    checked_path(project).mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        for name, content in files.items():
+            path = checked_path(target / name)
+            if not path.is_file() or path.read_bytes() != content:
+                raise ValueError('Existing commercial source differs. Choose a fresh slug: ' + name)
+        return report
+    # Publish the complete source tree in one rename; concurrent generators cannot interleave files.
+    with TemporaryDirectory(dir=project) as staging:
+        tree = Path(staging) / 'source'
+        for name, content in files.items():
+            path = tree / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        tree.rename(target)
+    return report
+
+
 def run(slug: str, facts_file: Path, *, approved: bool, facts_approved: bool, allow_switch=False,
-        root=None, select=None, infer=None, loader=None, layout_file=None):
+        root=None, select=None, infer=None, loader=None, layout_file=None, commercial=False):
     # Import lazily: fact consumers need no models or website dependencies.
     from core.capabilities import website_factory as wf
     sc = wf.sc
@@ -205,6 +247,10 @@ def run(slug: str, facts_file: Path, *, approved: bool, facts_approved: bool, al
     raw = strict_json(wf.read_text(Path(facts_file).resolve(), 32000))
     facts = BusinessFacts.parse(raw)
     project = sc.safe_target(root, slug).parent
+    if commercial:
+        if layout_file is not None:
+            raise ValueError('The commercial design supplies its own layout')
+        return commercial_source(project, facts, raw, wf.scaffold(root, facts.render_data()['name']))
     design = wf.design_artifacts(project)
     # The older model-written React builder used the project root. Keep its
     # files and checkpoints intact; verified output lives in its own subfolder.
