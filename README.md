@@ -12,6 +12,8 @@ Repository: `AustinUri/my_own_Jarvis`
 
 ## Current Status
 
+The Windows Control Center includes a native Private AI panel for ChatGPT plan sign-in, local Qwen/Gemma fallback and selective conversation import. [Setup and privacy guide](docs/PRIVATE_AI.md)
+
 JARVIS V30 has completed its cloud foundation and the first stage of phone intelligence.
 
 ### Phase 1 — Cloud Foundation ✅
@@ -229,6 +231,8 @@ Carrier-call audio access is restricted on modern Android, so full two-way AI ca
 
 ## Future Roadmap
 
+The current commercial priority is an evidence-backed Website Factory demo for owner review. The Video Factory runs in parallel with local episode reviews. The unified dashboard and Coding JARVIS follow those checkpoints.
+
 ### Phase 3 — Command Center + Engineering + Vision
 
 Planned:
@@ -239,7 +243,6 @@ Planned:
 - engineering workspace
 - mechanical reasoning and calculations
 - measurement workflows where technically practical
-- HoloLab restoration and expansion
 - future CAD / model-generation workflows
 
 ### Phase 4 — eBay Low-Touch Business
@@ -659,7 +662,7 @@ Optional local-AI writing (requires a running, compatible LM Studio server/model
 python -m core.capabilities.youtube_autopilot.creative_factory create --count 1 --backend local-ai --render
 ```
 
-The offline curated source has a **finite** number of story templates; it is not an infinite generator. The local-AI backend must validate new stories and avoid duplicates. The existing animation system produces simple procedural artwork, not high-quality cartoon acting. **A valid MP4, motion score, narration track, or passing unit test is not creative approval.**
+Offline generation draws from thirteen original staged plots. The local-AI backend checks new stories against the renderer vocabulary and the saved draft history. The draft renderer uses jointed characters, illustrated backgrounds, and cuts timed to each Piper recording. Ask JARVIS “Create an English kids animation draft” for a local preview. **Creative approval requires watching and listening to the episode.**
 
 **Release rule:** no YouTube uploads or autonomous publishing until the visual engine is substantially improved, the story and visuals match, originality and child-safety are reviewed, audio/captions are checked, and the owner approves a release process. YouTube OAuth credentials, tokens, rendered media, queue data, voice models, and drafts must stay outside Git.
 

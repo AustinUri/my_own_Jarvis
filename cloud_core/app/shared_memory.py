@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
 
+from .memory_text import memory_tokens
+
 
 DEFAULT_SCOPE = "primary"
 DEFAULT_TURN_RETENTION_DAYS = 30
@@ -731,16 +733,6 @@ class SharedMemoryStore:
             for row in rows
         ]
 
-    _CONTEXT_STOP_WORDS = {
-        "a", "an", "the", "is", "are", "was", "were", "be", "been",
-        "my", "your", "our", "i", "me", "you", "we", "it", "this", "that",
-        "what", "which", "who", "how", "do", "does", "did", "to", "of", "in",
-        "on", "for", "and", "or", "with", "about", "from", "called", "name",
-        "please", "can", "could", "would", "should",
-        "של", "שלי", "שלך", "מה", "מי", "איך", "את", "אתה", "אני", "הוא",
-        "היא", "זה", "זאת", "עם", "על", "אל", "לי", "לך", "לנו", "קוראים",
-    }
-
     _CONTEXT_META_RE = re.compile(
         r"\b(?:remember|memory|memories|earlier|previous|before|last\s+time|continue|we\s+discussed|i\s+told\s+you|what\s+did\s+i\s+say|what\s+do\s+you\s+know)\b"
         r"|(?:זוכר|זיכרון|זכרונות|קודם|לפני|המשך|דיברנו|אמרתי\s+לך)",
@@ -752,13 +744,7 @@ class SharedMemoryStore:
         re.IGNORECASE,
     )
 
-    @classmethod
-    def _tokens(cls, text: str) -> set[str]:
-        return {
-            token.casefold()
-            for token in re.findall(r"[\w\u0590-\u05FF]+", text or "", flags=re.UNICODE)
-            if len(token) >= 2 and token.casefold() not in cls._CONTEXT_STOP_WORDS
-        }
+    _tokens = staticmethod(memory_tokens)
 
     @classmethod
     def _wants_broad_context(cls, query: str) -> bool:

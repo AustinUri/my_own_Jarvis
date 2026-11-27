@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Iterable
 
 
@@ -9,6 +10,25 @@ class CapabilityRoute:
     domain: str
     capabilities: tuple[str, ...]
     reason: str
+
+
+# These direct requests also work when the conversational model is offline.
+# More specific creative briefs stay with the normal conversation handler.
+_EPISODE_REQUEST = re.compile(
+    r"(?:please\s+)?(?:create|make|generate|render|produce)\s+"
+    r"(?:(?:a|an|another|one|new|original|english|animated|children's|kids'?|2d)\s+)*"
+    r"(?:nori\s*(?:&|and)\s*blink\s+episode|cartoon(?:\s+episode)?|kids'?\s+animation|"
+    r"children's\s+animation|animation\s+draft)(?:\s+draft)?"
+    r"|(?:תכין|תייצר|צור)\s+(?:פרק חדש של נורי ובלינק|סרטון ילדים מקורי(?: ליוטיוב)?)",
+    re.IGNORECASE,
+)
+
+
+def requests_local_episode(request: str) -> bool:
+    words = re.sub(r"^(?:hey\s+)?(?:jarvis|ג'רוויס)[\s,:]+", "", request.strip(), flags=re.I)
+    if not re.search(r"\b(?:kids?|children|nori)\b|ילדים|נורי", words, re.I):
+        return False
+    return bool(_EPISODE_REQUEST.fullmatch(words.rstrip(".!? ").replace("’", "'")))
 
 
 ROUTES = {

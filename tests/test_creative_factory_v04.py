@@ -1,11 +1,40 @@
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 import tempfile
+import random
 import unittest
 from pathlib import Path
-from core.capabilities.youtube_autopilot.creative_factory import create_story,frame,offline_story,_signature,STORIES
+from unittest.mock import patch
+from core.capabilities.youtube_autopilot.creative_factory import create_story,frame,main,offline_story,_signature,STORIES
 from core.capabilities.youtube_autopilot.manager import setup,config,read
 from PIL import ImageChops,ImageStat
 class CreativeFactoryV04Tests(unittest.TestCase):
+    def test_cli_signals_rejected_and_failed_renders(self):
+        target = "core.capabilities.youtube_autopilot.creative_factory.render_draft"
+        for mode in ("create", "worker"):
+            for rejected in (True, False):
+                with self.subTest(mode=mode, rejected=rejected), tempfile.TemporaryDirectory() as root:
+                    args = [mode, "--root", root, "--backend", "offline", "--render"]
+                    if mode == "worker":
+                        args.extend(["--max-cycles", "1"])
+                    with patch(target) as render, redirect_stdout(StringIO()) as output:
+                        if rejected:
+                            render.return_value = {"video": "review.mp4", "mechanical_qa_error": "Static scene"}
+                        else:
+                            render.side_effect = RuntimeError("Encoder unavailable")
+                        self.assertEqual(main(args), 1)
+                    self.assertIn("render_rejected" if rejected else "render_failed", output.getvalue())
+
+    def test_each_available_opening_prop_gets_a_turn(self):
+        prop_count = len({beats[0][3] for _, _, beats in STORIES})
+        for seed in range(10):
+            seen = []
+            rng = random.Random(seed)
+            for _ in range(prop_count):
+                seen.append(offline_story(None, seen, rng))
+            self.assertEqual(len({ep['scenes'][0]['prop'] for ep in seen}), prop_count)
+
     def test_generates_unique_stories_and_visual_plans(self):
         with tempfile.TemporaryDirectory() as t:
             root=setup(Path(t))

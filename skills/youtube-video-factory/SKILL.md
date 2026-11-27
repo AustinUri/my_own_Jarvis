@@ -1,59 +1,30 @@
 ---
 name: youtube-video-factory
-description: JARVIS first-party local kids episode storyboarding, narrated draft generation and strict publication QA. Never auto-upload from this skill.
+description: Generate original English Nori and Blink cartoon drafts locally with a reusable character rig, Piper, FFmpeg and per-scene review.
 ---
-# YouTube Video Factory — JARVIS First-Party Skill
+# YouTube Video Factory
 
-## Status and scope
-This skill is **project-owned, tracked in Git**, and uses the installed code under
-`core/capabilities/youtube_autopilot/`. It is a **draft-production skill**, not
-proof of professional animation. The current renderer is procedural clip-art;
-its output must NOT be published until replaced and creatively reviewed.
-
-## Natural-language triggers
-- "JARVIS, create a new original Nori & Blink episode"
-- "Create an English kids animation draft"
-- "תכין פרק חדש של נורי ובלינק"
-- "תייצר סרטון ילדים מקורי ליוטיוב"
-
-## Execution boundary
-Import `core.capabilities.youtube_autopilot.skill_runtime.execute` and call
-only its explicit actions: `capabilities`, `status`, `create-draft`, `audit-draft`.
-This skill MUST NEVER call `youtube_autopilot.enable`, `run-once`, `worker`,
-`youtube_api.upload` or `authorize` as a generic agent action.
-
-Commands in the repository root:
+Ask JARVIS “Create an English kids animation draft” or “תכין פרק חדש של נורי ובלינק”. On the Windows worker these commands run the local skill and return the finished preview path. The episode generator also runs directly from the repository.
 
 ```powershell
 python -m core.capabilities.youtube_autopilot.skill_runtime status
-python -m core.capabilities.youtube_autopilot.skill_runtime create-draft --backend offline
-python -m core.capabilities.youtube_autopilot.skill_runtime create-draft --backend local-ai --render
+python -m core.capabilities.youtube_autopilot.skill_runtime create-draft --backend auto --render
+python -m core.capabilities.youtube_autopilot.skill_runtime audit-draft --draft-id <generated-id>
 ```
 
-The `local-ai` backend requires an already-running LM Studio Qwen model and
-zero paid API tokens. Offline fallback has only 12 original story templates,
-then safely exhausts rather than repeating stories.
+Use `core.capabilities.youtube_autopilot.skill_runtime.execute` for the four skill actions `capabilities`, `status`, `create-draft` and `audit-draft`. By default the skill stores scripts under `var/youtube_autopilot/creative_drafts/`, movies and narration under `renders/` inside that directory, and audit results under `reports/`. Use `--root` for an isolated library and its voice configuration.
 
-## Pipeline
-1. Original plot and narration written by local AI or finite offline fallback.
-2. Distinct six-beat storyboard; check character roles, action and prop alignment.
-3. Generate English speech with local Piper.
-4. Render an MP4 preview with FFmpeg, into ignored `var/` runtime state.
-5. Run mechanical video QA **and** storyboard visual audit.
-6. Human evaluates actual animation, sound, story and originality.
-7. **BLOCK** publication. Existing YouTube Autopilot's separate publisher remains
-   outside this Skill; not integrated into an approved release process.
+## Production
 
-## Quality constraints
-- Do not treat motion-score or a valid MP4 as evidence of child-friendly production quality.
-- Story objects must appear visually when mentioned; weak scene labels alone do not prove rendering.
-- Stable, original designs; use only licensed assets.
-- The current procedural renderer is below the publication bar.
-- Final deployment requires explicit release process and child-directed-content settings.
+1. With `--backend auto`, the writer tries the configured loopback LM Studio endpoint. Qwen plans each shot and writes the dialogue. The action selected for the rig supplies the narrator's action line. The factory checks titles, narration and staged action sequences against the local library. Offline mode chooses from thirteen original six-beat plots and stops when they are exhausted. Explicit `--backend local-ai` reports a failed generation if the model is unavailable or its plans fail validation.
+2. Every beat specifies a setting, framing, character action and one featured prop. The stage draws two original jointed characters and the selected prop on a painted set. Carrying uses a hand attachment. Tracking and close shots change the composition. The vocabulary is defined in `visual_contract.py`; extend the actual staging and its tests when adding words to that contract.
+3. Install Pillow, make FFmpeg and ffprobe available, and configure `piper_bin` and `piper_model` in the local runtime config. Each English Piper recording sets its own scene length. The encoder appends a brief reaction hold and cuts on a video frame boundary.
+4. `create-draft --render` fits captions and checks the encoded MP4. `render_rejected` identifies an output that failed technical review. `audit-draft` rechecks the stored movie against its storyboard, prop art and narration timeline. Review motion, prop contact, facial acting, pacing, voice and story on the actual movie.
 
-## Project state and privacy
-- Code and this Skill live in Git. Generated renders, tokens, queue, voice models,
-  local runtime JSON and drafts live under `var/youtube_autopilot/`, **ignored by Git**.
-- No secrets, voice files, local videos, or user/customer data in Git.
-- A worker generates only while the PC is on; pre-scheduled YouTube videos can
-  publish independently after upload, but the local model cannot run with PC off.
+The local draft worker can repeat this process while the PC is running. For a single unattended cycle:
+
+```powershell
+python -m core.capabilities.youtube_autopilot.creative_factory worker --backend auto --render --max-cycles 1
+```
+
+Publication approval stays with the owner. This skill has no upload, OAuth, scheduling or publishing action. Keep the legacy publisher, its queue and its credentials outside this workflow. Generated media, voice models and runtime state belong in ignored `var/`. See [the creative review criteria](references/QUALITY_BAR.md).

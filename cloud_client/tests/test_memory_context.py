@@ -19,17 +19,17 @@ class MemoryContextTests(unittest.TestCase):
         ]
         self.assertEqual(last_user_text(messages), "What is my project called?")
 
-    def test_inject_after_system_messages_without_mutating_input(self):
+    def test_enriches_the_single_system_message_without_mutating_input(self):
         messages = [
             {"role": "system", "content": "main system"},
             {"role": "user", "content": "hello"},
         ]
         result = inject_memory_prompt(messages, "Shared facts:\n- project is Apolo")
-        self.assertEqual(messages[1]["role"], "user")
-        self.assertEqual(result[0]["content"], "main system")
-        self.assertEqual(result[1]["role"], "system")
-        self.assertIn("project is Apolo", result[1]["content"])
-        self.assertEqual(result[2]["role"], "user")
+        self.assertEqual(messages[0]["content"], "main system")
+        self.assertEqual([m["role"] for m in result], ["system", "user"])
+        self.assertTrue(result[0]["content"].startswith("main system\n"))
+        self.assertIn("project is Apolo", result[0]["content"])
+        self.assertEqual(result[1], messages[1])
 
     def test_duplicate_memory_marker_is_not_added(self):
         messages = [

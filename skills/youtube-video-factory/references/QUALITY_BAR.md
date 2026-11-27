@@ -12,4 +12,4 @@ Before any video may enter a publication queue:
 - **Content**: age-appropriate and respectful; no frightening, unsafe, deceptive or commercial prompts. Human reviewers decide child-directed setting and quality.
 - **High-quality repeatability**: demonstrate three significantly different completed episodes, not three color variants, before considering scale.
 
-Current legacy procedural renderer does **not** satisfy this bar. `motion_audit` is just a weak technical filter. The repo skill intentionally labels its outputs `draft_needs_visual_review` and never uploads them.
+The storybook rig produces local review drafts. Inspect the encoded frames where a hand grasps an object, each change of expression and each scene transition. Check the soundtrack at each cut. The technical report samples one instant per scene for prop visibility and four for motion. A reviewer evaluates the rest of the performance and the story as a whole.

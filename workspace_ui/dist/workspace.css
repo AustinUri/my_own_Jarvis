@@ -383,3 +383,13 @@ body.surface-focus .widget:not(.surface-focused-widget){opacity:.82!important}
 .call-row:hover,.call-row.selected{border-color:rgba(255,195,103,.42);background:rgba(26,35,40,.72)}.call-row div{min-width:0}.call-row b{display:block;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.call-row small{display:block;color:#789baa;font-size:8px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.call-row em{font-style:normal;font-size:8px;color:#9db9c3}
 .call-direction{font-size:7px;letter-spacing:.07em;padding:5px 6px;border-radius:999px;text-align:center;background:rgba(103,210,247,.08);color:#84def7}.call-direction.incoming{color:#7ff1bd}.call-direction.outgoing{color:#ffd078}.call-direction.missed,.call-direction.rejected{color:#ff8d9b}
 .call-detail{margin-top:10px;padding:11px;border-radius:12px;border:1px solid rgba(255,194,99,.16);background:rgba(14,27,35,.62)}.call-detail>b{display:block;color:#f2fbff}.call-detail>span{display:block;color:#84a8b5;font-size:8px;margin-top:3px}.call-summary-note{margin-top:9px;padding:9px 10px;border-radius:10px;background:rgba(3,17,25,.7);border:1px solid rgba(104,189,219,.12);color:#7fa0ad;font-size:8px;line-height:1.45}.call-summary-note strong{display:block;color:#ffcd7a;letter-spacing:.08em;margin-bottom:4px}.call-summary-note p{margin:0}
+
+/* The desktop's private Conversation frame shares the Control Center theme. */
+.chat-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; }
+.chat-controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+.chat-controls select { max-width: 16rem; background: #0b1b27; color: var(--text); border: 1px solid #376173; border-radius: 6px; padding: 4px; }
+.conversation [hidden] { display: none !important; }
+.private-conversation { flex: 1; min-height: 0; width: 100%; border: 0; background: #09151f; }
+body.private-chat { height: 100vh; margin: 0; overflow: hidden; background: #09151f; color: #e2edf3; }
+body.private-chat::before, body.private-chat::after { display: none; }
+.private-status { margin: 0; padding: 4px 12px; color: #acccdc; font-size: 12px; }

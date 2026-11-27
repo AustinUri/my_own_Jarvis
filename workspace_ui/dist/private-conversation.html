@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <link rel="stylesheet" href="/workspace.css">
+  <title>Private conversation</title>
+</head>
+<body class="private-chat">
+  <main class="conversation">
+    <div class="chat-controls">
+      <label>Collection <select id="project"><option value="">Personal</option></select></label>
+      <button type="button" id="providers">Providers</button>
+      <button type="button" id="memory">Memory</button>
+    </div>
+    <div id="history" class="conversation-scroll" role="log" aria-live="polite"></div>
+    <p class="private-status" id="status" role="status">Opening private memory…</p>
+    <form id="compose" class="composer" autocomplete="off">
+      <input id="question" aria-label="Private question" maxlength="16000" placeholder="Ask JARVIS privately…" spellcheck="false" disabled>
+      <button class="primary" id="send" disabled>Send</button>
+    </form>
+  </main>
+  <script defer src="/private-conversation.js"></script>
+</body>
+</html>

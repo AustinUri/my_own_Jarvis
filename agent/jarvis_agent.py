@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+from functools import cached_property
 from typing import Any, Callable
 
 from agent.conversation import ConversationMemory
 from agent.policy import RequestPolicy
 from agent.provider import OpenAICompatibleProvider, ProviderError
 from core.config import AppConfig
+from core.capabilities.router import requests_local_episode
 from core.events import AssistantReply, ToolAction
 from llm.brain import Brain as LegacyFallbackBrain
 from tools.registry import ToolRegistry
@@ -59,6 +61,15 @@ class JarvisAgent:
         except ProviderError as exc:
             return str(exc)
 
+    @cached_property
+    def private_brain(self):
+        from agent.private_brain import PrivateBrain
+        return PrivateBrain(config=self.config)
+
+    def process_private(self, project: str, user_text: str) -> str:
+        """Native authenticated turn, returned directly without shared tool or history callbacks."""
+        return self.private_brain.ask(project, user_text)
+
     def analyze_camera_frame(self, data_url: str, prompt: str) -> str:
         """Analyze one explicitly shared camera frame with the configured VLM.
 
@@ -91,6 +102,10 @@ class JarvisAgent:
 
     def process(self, user_text: str) -> AssistantReply:
         language = self.detect_language(user_text)
+        if requests_local_episode(user_text):
+            reply = self._local_episode(user_text, language)
+            self.memory.add_turn(user_text, reply.gui_text)
+            return reply
         policy = RequestPolicy.from_text(user_text)
         try:
             reply = self._run_agent_loop(user_text, language, policy)
@@ -99,6 +114,22 @@ class JarvisAgent:
             reply = self._run_fallback(user_text, language)
         self.memory.add_turn(user_text, reply.gui_text)
         return reply
+
+    def _local_episode(self, user_text: str, language: str) -> AssistantReply:
+        from subprocess import SubprocessError
+        try:
+            from core.capabilities.youtube_autopilot.skill_runtime import execute
+            result = execute("create-draft", root=self.tools.base_dir / "var" / "youtube_autopilot",
+                             backend="auto", render=True)
+            if result["state"] == "render_rejected":
+                raise ValueError(result["render"]["mechanical_qa_error"])
+            spoken = "הפרק מוכן לצפייה." if language == "he" else "Your episode is ready to review."
+            text = f'{spoken}\n{result["title"]}\n{result["render"]["video"]}'
+        except (ImportError, OSError, ValueError, RuntimeError, SubprocessError) as exc:
+            spoken = "הפקת הפרק נעצרה." if language == "he" else "Episode production stopped."
+            text = f"{spoken}\n{exc}"
+        return AssistantReply(user_language=language, intent="youtube-video-factory", gui_text=text,
+                              spoken_text=spoken, raw_user_text=user_text, tool_trace=["youtube-video-factory"])
 
     def _build_provider(self) -> OpenAICompatibleProvider:
         return OpenAICompatibleProvider(

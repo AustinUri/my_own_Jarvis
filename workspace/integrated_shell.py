@@ -6,12 +6,14 @@ import urllib.parse
 from PySide6.QtCore import QUrl, QStandardPaths, Qt, QTimer
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QPushButton, QLineEdit, QLabel
+    QPushButton, QLineEdit, QLabel, QDockWidget
 )
 
 try:
     from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
     from PySide6.QtWebEngineWidgets import QWebEngineView
+    from workspace.private_dashboard import SCHEME, ConversationHandler, DashboardPage, register_scheme
+    register_scheme()
 except Exception:  # pragma: no cover
     QWebEnginePage = QWebEngineProfile = QWebEngineSettings = QWebEngineView = None
 
@@ -24,19 +26,25 @@ class JarvisIntegratedShell(QMainWindow):
     avoids V28's browser-stream crashes while keeping websites inside JARVIS.
     """
 
-    def __init__(self, workspace_url: str, build: str = '29.2', surface_controller=None) -> None:
+    def __init__(self, workspace_url: str, build: str = '29.2', surface_controller=None,
+                 brain_factory=None, ask_private=None) -> None:
         if QWebEngineView is None:
             raise RuntimeError('Qt WebEngine is not available')
         super().__init__()
         self.workspace_url = workspace_url
         self.build = build
         self.surface_controller = surface_controller
+        self._brain_factory = brain_factory
+        self._ask_private = ask_private
+        self._private_ai_dialog = None
+        self._private_dock = None
         self._surface_recovery_count = 0
         self._manual_split = False
 
         self.setWindowTitle(f'JARVIS v{build} · HOLO CORE')
         self.resize(1660, 980)
         self.setMinimumSize(1120, 720)
+        self.menuBar().addAction('Private AI settings', lambda: self.open_private_ai())
 
         app_root = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
         app_root.mkdir(parents=True, exist_ok=True)
@@ -54,7 +62,11 @@ class JarvisIntegratedShell(QMainWindow):
                 pass
 
         self.control_view = QWebEngineView(self)
-        self.control_view.setPage(QWebEnginePage(self.control_profile, self.control_view))
+        page = DashboardPage(self.control_profile, self.workspace_url, self.control_view)
+        self.control_view.setPage(page)
+        self._private_handler = ConversationHandler(page, self._brain, ask_private)
+        self._private_handler.settings_requested.connect(self.open_private_ai)
+        self.control_profile.installUrlSchemeHandler(SCHEME, self._private_handler)
         self.control_view.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         self.control_view.setUrl(QUrl(self.workspace_url))
 
@@ -128,6 +140,38 @@ class JarvisIntegratedShell(QMainWindow):
             self.surface_controller.back_requested.connect(self.surface_view.back)
             self.surface_controller.forward_requested.connect(self.surface_view.forward)
             self.surface_controller.reload_requested.connect(self.surface_view.reload)
+
+    def _brain(self):
+        if self._brain_factory is None:
+            from agent.private_brain import PrivateBrain
+            brain = PrivateBrain()
+            self._brain_factory = lambda: brain
+        return self._brain_factory()
+
+    def open_private_ai(self, section="providers", project="") -> None:
+        from workspace.private_ai_dialog import PrivateAIDialog
+        from PySide6.QtWidgets import QMessageBox
+
+        if self._private_dock is None:
+            try:
+                panel = PrivateAIDialog(self._brain(), self, ask_private=self._ask_private)
+            except Exception:
+                QMessageBox.warning(self, "Private AI", "This user's private storage could not be opened.")
+                return
+            dock = QDockWidget("Private AI settings", self)
+            dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+            panel.setWindowFlags(Qt.WindowType.Widget)
+            panel.tabs.setTabVisible(0, False)
+            dock.setWidget(panel)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            self._private_ai_dialog, self._private_dock = panel, dock
+        panel = self._private_ai_dialog
+        if panel._pending is None:
+            panel._collections(project)
+            panel._refresh_status()
+            panel.tabs.setCurrentIndex(2 if section == "memory" else 1)
+        self._private_dock.show()
+        self._private_dock.raise_()
 
     def _site_ratio(self, url: str) -> float:
         host = (urllib.parse.urlparse(url).netloc or '').lower()

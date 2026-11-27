@@ -131,7 +131,7 @@ function handleUiCommand(v){const a=v?.action,payload=v?.payload||{}
 function renderAll(){
   const pop=new URLSearchParams(location.search).get('popout')
   if(pop&&WIDGETS[pop])return renderPopout(pop)
-  app.innerHTML=`<div class="app"><div id="top"></div><div id="toolbar"></div><div class="workspace-wrap"><div id="workspace" class="workspace ${state.editing?'editing':''}"></div></div></div>`
+  if (!document.getElementById('workspace')) app.innerHTML=`<div class="app"><div id="top"></div><div id="toolbar"></div><div class="workspace-wrap"><div id="workspace" class="workspace ${state.editing?'editing':''}"></div></div></div>`
   renderTop();renderToolbar();renderWorkspace();bindGlobalKeys()
 }
 function renderTop(){const el=document.getElementById('top');if(!el)return
@@ -153,8 +153,16 @@ function renderToolbar(){const el=document.getElementById('toolbar');if(!el)retu
 function activeLayout(){return state.layouts[state.workspace]||structuredClone(DEFAULT[state.workspace])}
 function activeHidden(){return state.hidden[state.workspace]||[]}
 function applyWorkspace(name){if(!state.layouts[name])return;state.workspace=name;const meta=state.profileMeta[name]||{};if(meta.theme){state.theme=meta.theme;document.documentElement.dataset.theme=state.theme}save();renderAll();if(name==='Phone Center'){send('phone_status');send('phone_call_history',{limit:30});send('refresh_calendar',{days:7})}}
-function renderWorkspace(){const ws=document.getElementById('workspace');if(!ws)return;ws.className=`workspace ${state.editing?'editing':''}`;ws.innerHTML=''
-  const items=activeLayout().filter(i=>!activeHidden().includes(i.id));items.forEach(item=>ws.appendChild(makeWidget(item)))
+function renderWorkspace(){const ws=document.getElementById('workspace');if(!ws)return;ws.className=`workspace ${state.editing?'editing':''}`
+  const items=activeLayout().filter(i=>!activeHidden().includes(i.id))
+  const chat=items.some(i=>i.id==='conversation') && ws.querySelector('[data-id="conversation"]')
+  for (const child of Array.from(ws.children)) if(child!==chat) child.remove()
+  items.forEach(item=>{
+    if(item.id!=='conversation'||!chat){ws.appendChild(makeWidget(item));return}
+    if(state.editing){makeDraggable(chat,item);makeResizable(chat,item)}
+    else {qs('.widget-header',chat).onpointerdown=null;qs('.resize-handle',chat).onpointerdown=null}
+    renderWidgetInto(chat,'conversation')
+  })
   positionAll();const maxY=Math.max(12,...items.map(i=>i.y+i.h));ws.style.minHeight=`${maxY*ROW+GAP}px`
 }
 function makeWidget(item){const el=document.createElement('section');el.className='widget';el.dataset.id=item.id
@@ -350,14 +358,44 @@ function renderLearning(body){const l=state.f1Lesson||state.dailyBriefing?.f1_le
 function renderServices(body){const s=state.serviceStatus||{};const rows=[['Oracle Cloud',s.cloud_core],['Windows Agent',s.windows_device],['Samsung Agent',s.samsung_device],['AI server',s.lm_studio],['Qwen',s.model],['Docker',s.docker],['SearXNG API',s.searxng]];body.innerHTML=`<div class="service-list">${rows.map(([k,v])=>`<div class="service-row"><span>${k}</span><b class="${v==='online'||v==='loaded'?'ok':'warn'}">${esc(String(v||'checking'))}</b></div>`).join('')}</div><small>V30 device status is cloud-first. Local AI and web services may remain optional workers.</small>`}
 
 function renderConversation(body){
+  if(!body.querySelector('.conversation')){
+    body.innerHTML='<div class="conversation"><div class="conversation-scroll"></div><form class="composer"><button type="button" class="mic-button" aria-label="Push to talk">◉</button><input aria-label="Shared command" placeholder="Type or speak to Jarvis…"><button class="primary">Send</button></form></div>'
+    const input=qs('input',body)
+    qs('form',body).onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(text){send('submit_text',{text});input.value=''}}
+    qs('.mic-button',body).onclick=()=>send('push_to_talk')
+    if(window.jarvisDesktopChat && !new URLSearchParams(location.search).has('popout')){
+      const mode=document.createElement('div')
+      mode.className='chat-controls'
+      mode.innerHTML='<label>Conversation <select aria-label="Conversation mode"><option>Shared</option><option>Private</option></select></label>'
+      qs('.conversation',body).prepend(mode)
+      qs('select',mode).onchange=e=>{
+        const privateMode=e.target.value==='Private'
+        input.value=''
+        qs('form',body).hidden=privateMode
+        qs('.conversation-scroll',body).hidden=privateMode
+        if(privateMode){
+          const frame=document.createElement('iframe')
+          frame.title='Private JARVIS conversation'
+          frame.className='private-conversation'
+          frame.src='jarvis-chat://desktop/conversation'
+          qs('.conversation',body).appendChild(frame)
+        }else{
+          qs('iframe',body)?.remove()
+          renderConversation(body)
+          input.focus()
+        }
+      }
+    }
+  }
+  if(qs('iframe',body))return
   const hist=Array.isArray(state.runtime.history)?state.runtime.history:[]
   const bubbles=hist.map(m=>{const rtl=/[\u0590-\u05FF]/.test(m.content||'')?'rtl':'';return `<div class="bubble ${m.role==='user'?'you':'jarvis'} ${rtl}"><div class="bubble-title">${m.role==='user'?'YOU':'JARVIS'}</div>${esc(m.content||'')}</div>`}).join('')
   const lastUser=[...hist].reverse().find(m=>m.role==='user')?.content||''
   const pending=state.runtime.transcript&&state.runtime.transcript!==lastUser?`<div class="bubble you"><div class="bubble-title">YOU · PENDING</div>${esc(state.runtime.transcript)}</div>`:''
   const fallback=!hist.length?((state.runtime.transcript?`<div class="bubble you"><div class="bubble-title">YOU</div>${esc(state.runtime.transcript)}</div>`:'')+(state.runtime.response?`<div class="bubble jarvis ${state.runtime.responseLanguage==='he'?'rtl':''}"><div class="bubble-title">JARVIS</div>${esc(state.runtime.response)}</div>`:'')):''
-  body.innerHTML=`<div class="conversation"><div class="conversation-scroll">${bubbles+pending||fallback||'<div class="empty">Say “Hey Jarvis” or type below.</div>'}</div><div class="composer"><button class="mic-button">◉</button><input placeholder="Type or speak to Jarvis…"><button class="primary">Send</button></div></div>`
-  const input=qs('input',body),go=()=>{const text=input.value.trim();if(text){send('submit_text',{text});input.value=''}}
-  qs('.primary',body).onclick=go;qs('.mic-button',body).onclick=()=>send('push_to_talk');input.onkeydown=e=>{if(e.key==='Enter')go()};requestAnimationFrame(()=>{const scroll=qs('.conversation-scroll',body);if(scroll)scroll.scrollTop=scroll.scrollHeight})
+  const scroll=qs('.conversation-scroll',body)
+  scroll.innerHTML=bubbles+pending||fallback||'<div class="empty">Say “Hey Jarvis” or type below.</div>'
+  requestAnimationFrame(()=>{scroll.scrollTop=scroll.scrollHeight})
 }
 function parseSources(){return state.runtime.response.split(/\r?\n/).flatMap(line=>{const m=line.match(/https?:\/\/\S+/);if(!m)return[];return[{url:m[0].replace(/[),.;]+$/,''),label:line.replace(m[0],'').replace(/^\s*\d+[.)]\s*/,'').replace(/[—–-]\s*$/,'').trim()||m[0]}]})}
 function renderSources(body){const src=parseSources();body.innerHTML=src.length?`<div class="source-list">${src.map((s,i)=>`<a href="${attr(s.url)}" target="_blank"><span class="n">${i+1}</span><div><b>${esc(s.label)}</b><small>${esc(s.url)}</small></div></a>`).join('')}</div>`:`<div class="empty">Sources appear here after researched answers.</div>`}

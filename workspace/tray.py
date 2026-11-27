@@ -23,9 +23,12 @@ class WorkspaceTray:
         self.quit_callback = quit_callback
         self.service_manager = service_manager
         self.workspace_window = None
+        self._private_dialog = None
         if JarvisIntegratedShell is not None:
             try:
-                self.workspace_window = JarvisIntegratedShell(self.url, build='29.2', surface_controller=surface_controller)
+                self.workspace_window = JarvisIntegratedShell(self.url, build='29.2', surface_controller=surface_controller,
+                                                              brain_factory=lambda: orchestrator.private_brain,
+                                                              ask_private=orchestrator.ask_private)
             except Exception:
                 self.workspace_window = None
         self.icon = QSystemTrayIcon(self._make_icon(), app)
@@ -35,6 +38,10 @@ class WorkspaceTray:
         open_action = QAction('Open JARVIS Control Center', self.menu)
         open_action.triggered.connect(self.open_workspace)
         self.menu.addAction(open_action)
+
+        private_action = QAction('Private AI', self.menu)
+        private_action.triggered.connect(self.open_private_ai)
+        self.menu.addAction(private_action)
 
         listen_action = QAction('Push-to-talk', self.menu)
         listen_action.triggered.connect(orchestrator.process_push_to_talk)
@@ -65,6 +72,19 @@ class WorkspaceTray:
     def _activated(self, reason) -> None:
         if reason in (QSystemTrayIcon.ActivationReason.DoubleClick, QSystemTrayIcon.ActivationReason.Trigger):
             self.open_workspace()
+
+    def open_private_ai(self) -> None:
+        if self.workspace_window is not None:
+            self.workspace_window.open_private_ai()
+            return
+        if self._private_dialog is None:
+            from workspace.private_ai_dialog import open_private_ai
+            self._private_dialog = open_private_ai(lambda: self.orchestrator.private_brain,
+                                                   ask_private=self.orchestrator.ask_private)
+        else:
+            self._private_dialog.show()
+            self._private_dialog.raise_()
+            self._private_dialog.activateWindow()
 
     def open_workspace(self) -> None:
         # Preferred V29 path: the Control Center itself is a native Qt

@@ -80,6 +80,14 @@ class Orchestrator(QObject):
     def enabled(self) -> bool:
         return self._enabled
 
+    @property
+    def private_brain(self):
+        return self.agent.private_brain
+
+    def ask_private(self, project: str, question: str) -> str:
+        # The regular pipeline emits transcripts and answers to the shared workspace.
+        return self.agent.process_private(project, question)
+
     def shutdown(self) -> None:
         self._end_conversation_session()
         self._stop_wake_word_listener()
