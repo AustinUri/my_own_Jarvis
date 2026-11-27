@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from core.gaming_mode import gaming_reason, is_local_endpoint
 
@@ -44,9 +45,13 @@ class OpenAICompatibleProvider:
         items = payload.get("data", []) if isinstance(payload, dict) else []
         return [str(item.get("id")) for item in items if isinstance(item, dict) and item.get("id")]
 
-    def resolve_model(self) -> str:
+    def resolve_model(self, *, strict: bool = False) -> str:
         configured = (self.model or "").strip()
         models = self.list_models()
+        if strict:
+            if not configured or configured.lower() == "auto" or configured not in models:
+                raise ProviderError("The explicitly selected model is not available.")
+            return configured
         if configured and configured.lower() != "auto":
             if configured in models or not models:
                 return configured
@@ -68,6 +73,10 @@ class OpenAICompatibleProvider:
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.35,
         max_tokens: int | None = None,
+        *,
+        use_oracle_memory: bool = True,
+        strict_model: bool = False,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         def check_gaming_mode() -> None:
             if is_local_endpoint(self.base_url):
@@ -76,20 +85,21 @@ class OpenAICompatibleProvider:
                     raise ProviderError(reason + " Local AI is paused; retry after gaming.")
 
         check_gaming_mode()
-        model = self.resolve_model()
+        model = self.resolve_model(strict=True) if strict_model else self.resolve_model()
 
         # V30 Phase 1: local Windows reasoning reads the same canonical Oracle
         # memory as Samsung.  This is deliberately fail-open: if Oracle is
         # unreachable, LM Studio continues with the original messages.
         augmented_messages = messages
         direct_memory_hit = False
-        try:
-            from cloud_client.memory_context import prepare_messages_with_oracle_memory
+        if use_oracle_memory:
+            try:
+                from cloud_client.memory_context import prepare_messages_with_oracle_memory
 
-            augmented_messages, direct_memory_hit = prepare_messages_with_oracle_memory(messages)
-        except Exception:
-            augmented_messages = messages
-            direct_memory_hit = False
+                augmented_messages, direct_memory_hit = prepare_messages_with_oracle_memory(messages)
+            except Exception:
+                augmented_messages = messages
+                direct_memory_hit = False
 
         payload: dict[str, Any] = {
             "model": model,
@@ -100,6 +110,8 @@ class OpenAICompatibleProvider:
 
         if max_tokens is not None:
             payload["max_tokens"] = int(max_tokens)
+        if response_format is not None:
+            payload["response_format"] = response_format
         # A private recall question with a verified relevant Oracle-memory hit
         # must be answered from memory, not accidentally routed to web search.
         # All normal requests retain the full existing tool set.
@@ -114,6 +126,50 @@ class OpenAICompatibleProvider:
             headers=self._headers(),
             method="POST",
         )
+        raw = self._post(req, check_gaming_mode)
+
+        try:
+            message = raw["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderError(f"AI server returned an unexpected response: {raw!r}") from exc
+        if not isinstance(message, dict):
+            raise ProviderError("AI server returned an invalid assistant message.")
+        return message
+
+    def chat_without_reasoning(self, prompt: str, *, max_tokens: int = 256) -> dict[str, Any]:
+        """Explicit LM Studio native fast path; no tools, memory or saved chat."""
+        base = urlsplit(self.base_url)
+        if (base.scheme not in ("http", "https") or not is_local_endpoint(self.base_url)
+                or base.username or base.password or base.query or base.fragment
+                or base.path not in ("", "/", "/v1", "/v1/")):
+            raise ProviderError("Native LM Studio chat requires a loopback endpoint.")
+
+        def check_gaming_mode() -> None:
+            reason = gaming_reason()
+            if reason:
+                raise ProviderError(reason + " Local AI is paused; retry after gaming.")
+
+        check_gaming_mode()
+        model = self.resolve_model(strict=True)
+        payload = {"model": model, "input": prompt, "reasoning": "off",
+                   "max_output_tokens": int(max_tokens), "temperature": 0,
+                   "store": False, "stream": False}
+        req = urllib.request.Request(
+            f"{base.scheme}://{base.netloc}/api/v1/chat",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=self._headers(), method="POST")
+        raw = self._post(req, check_gaming_mode)
+        if not isinstance(raw, dict) or not isinstance(raw.get("output"), list):
+            raise ProviderError("Invalid native LM Studio response.")
+        items = raw["output"]
+        content = "".join(item["content"] for item in items
+                          if isinstance(item, dict) and item.get("type") == "message"
+                          and isinstance(item.get("content"), str))
+        if not content.strip():
+            raise ProviderError("Native LM Studio returned no final message.")
+        return {"content": content}
+
+    def _post(self, req, check_gaming_mode) -> dict[str, Any]:
         acquired = _LOCAL_LLM_SLOTS.acquire(timeout=max(5.0, min(float(self.timeout), 60.0)))
         if not acquired:
             raise ProviderError("Local AI concurrency guard is busy; try again in a moment.")
@@ -134,13 +190,7 @@ class OpenAICompatibleProvider:
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise ProviderError(f"AI request failed: {exc}") from exc
 
-        try:
-            message = raw["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ProviderError(f"AI server returned an unexpected response: {raw!r}") from exc
-        if not isinstance(message, dict):
-            raise ProviderError("AI server returned an invalid assistant message.")
-        return message
+        return raw
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}

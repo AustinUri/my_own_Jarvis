@@ -157,3 +157,67 @@ def release(lease: RuntimeLease) -> None:
     # Model TTL handles VRAM/RAM cleanup. The API server is stopped only when
     # this invocation started it; an already-running user server is preserved.
     stop_server_if_owned(lease.started_server)
+
+
+def prepare_exclusive_model(kind: str, *, allow_switch: bool = False) -> str:
+    """Opt-in sequential workflow; never evict unknown or busy instances.
+
+    Caller must keep other clients stopped: LM Studio has no atomic reservation
+    spanning the CLI inspection and subsequent unload/load operations.
+    """
+    import json
+    from urllib.parse import urlsplit
+
+    base = urlsplit(BASE_URL)
+    if (base.scheme != 'http' or base.hostname not in ('127.0.0.1', 'localhost', '::1')
+            or base.username or base.password or base.query or base.fragment
+            or base.path not in ('', '/')):
+        raise RuntimeError('Sequential workflow requires a local LM Studio endpoint.')
+    if kind not in MODEL_KEYS:
+        raise ValueError(f'Unsupported local model kind: {kind}')
+    require_local_ai_available()
+    if not server_online():
+        raise RuntimeError('Start the local LM Studio server first.')
+
+    def instances():
+        cp = _run([_lms(), 'ps', '--json'], timeout=15)
+        if cp.returncode:
+            raise RuntimeError('Cannot inspect loaded LM Studio instances.')
+        data = json.loads(cp.stdout)
+        if not isinstance(data, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get('identifier'), str)
+            or not row['identifier'] for row in data
+        ):
+            raise RuntimeError('Unexpected LM Studio instance inventory; refusing to switch.')
+        return data
+
+    def idle(row):
+        return (str(row.get('status', '')).lower() == 'idle'
+                and type(row.get('queued')) is int and row['queued'] == 0)
+
+    key = MODEL_KEYS[kind]
+    rows = instances()
+    if len(rows) > 1:
+        raise RuntimeError('Multiple models loaded. Unload them manually before this workflow.')
+    if rows and rows[0]['identifier'] != key:
+        previous = rows[0]['identifier']
+        if not allow_switch or previous not in set(MODEL_KEYS.values()):
+            raise RuntimeError(f'Will not unload {previous} without an authorized known-model switch.')
+        if not idle(rows[0]):
+            raise RuntimeError('Model is busy or idle status is unavailable; refusing automatic unload.')
+        require_local_ai_available()
+        # Check once more just before unloading; not an atomic reservation.
+        current = instances()
+        if len(current) != 1 or current[0]['identifier'] != previous or not idle(current[0]):
+            raise RuntimeError('LM Studio state changed; refusing automatic unload.')
+        cp = _run([_lms(), 'unload', previous], timeout=60)
+        if cp.returncode or instances():
+            raise RuntimeError('Previous model was not fully unloaded; refusing to load another.')
+    elif rows and ('status' in rows[0] or 'queued' in rows[0]) and not idle(rows[0]):
+        raise RuntimeError('Selected model is busy or its status is unclear.')
+    require_local_ai_available()
+    # Use the existing loader (no downloads, no all-model unload, no server stop).
+    model = ensure_model(kind, context=min(DEFAULT_CONTEXT, 32768))
+    if [row['identifier'] for row in instances()] != [model]:
+        raise RuntimeError('Exclusive model check failed; no inference will start.')
+    return model
